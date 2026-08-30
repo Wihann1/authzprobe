@@ -114,4 +114,4 @@ dotnet test
 
 ## Targets
 
-`net8.0` and `net9.0`. MIT licensed.
+`net8.0`, `net9.0` and `net10.0` (current LTS). MIT licensed.

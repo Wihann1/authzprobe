@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -11,7 +11,7 @@
 
   <PropertyGroup>
     <PackageId>AuthzProbe</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Wihann van der Merwe</Authors>
     <Description>Fails your build when ASP.NET Core endpoints are missing authorization, and flags endpoints that expose a resource identifier without resource-based authorization (IDOR / broken object level authorization risk).</Description>
     <PackageTags>aspnetcore;authorization;security;idor;bola;testing;multitenancy</PackageTags>
