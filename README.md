@@ -45,9 +45,10 @@ public void Authorization_surface_is_clean()
 | Code | Severity | What it means |
 |---|---|---|
 | **AZP001** | Error | Endpoint has no authorization metadata and no `[AllowAnonymous]` — it is anonymous *by omission*, not by decision. |
-| **AZP002** | Warning | Endpoint takes an object identifier but only requires "signed in". Any authenticated user can substitute another user's id. **This is the IDOR shape.** |
+| **AZP002** | Warning | Endpoint takes an object identifier, requires only "signed in", **and its handler never references the caller** — so it cannot be filtering by them. |
 | **AZP003** | Warning | Explicitly anonymous *and* addresses a specific object. Guessable ids are readable by anyone. |
 | **AZP004** | Info | Object-addressing endpoint guarded only by a role. A role says what kind of user you are, never which rows are yours. |
+| **AZP005** | Info | Object-addressing endpoint with no declarative scoping, but its handler *does* touch the caller — or could not be inspected. A review list, not a defect list. |
 
 Reads inline policies too — `RequireAuthorization(p => p.RequireRole("Admin"))` compiles the role
 into an `AuthorizationPolicy` where it never appears on `IAuthorizeData`, which is exactly the sort
@@ -58,11 +59,11 @@ of thing a naive scan misses.
 ```
 # AuthzProbe report
 
-- Endpoints scanned: **9**
-- Findings: **5** (1 error, 3 warning, 1 info)
+- Endpoints scanned: **10**
+- Findings: **6** (1 error, 3 warning, 2 info)
 - Result: **FAIL**
 
-## AZP002 — Object-addressing endpoint requires only an authenticated user (2)
+## AZP002 — Object-addressing endpoint cannot be scoping to the caller (2)
 
 - `GET /api/invoices/{id:guid}`
 - `GET /api/tenants/{tenantId}/documents/{documentId}`
@@ -88,12 +89,34 @@ AuthorizationSurfaceAnalyzer.Analyze(app, options).ThrowIfFailed();
 
 `health*`, `swagger*`, `.well-known/*`, `_framework/*` and `error*` are ignored by default.
 
+## How AZP002 avoids drowning you in false positives
+
+The common, correct way to scope a result in ASP.NET Core is inside the handler:
+
+```csharp
+var invoice = await _repo.GetForUserAsync(id, User.GetUserId());
+```
+
+Routing metadata cannot see that, so a naive check would flag every `{id}` endpoint in your
+codebase. AuthzProbe closes the gap from the other side: it reads the handler's IL — unwrapping
+async state machines to find the real body — and asks whether the code references the
+authenticated principal at all.
+
+A handler that never touches `User`, `ClaimsPrincipal`, `HttpContext` or `IAuthorizationService`
+has no way of knowing who is calling, so it **cannot** be filtering by them. That is a hard
+constraint, not a guess, and those endpoints are reported as **AZP002**.
+
+Everything else — handlers that do reference the caller, and handlers that could not be read —
+goes to **AZP005** for review.
+
 ## What it does not do
 
 It reports where the ownership check is *missing*, not whether a check that exists is *correct*.
-An endpoint with a resource-based policy passes — proving that policy is right is the job of your
-tests. This narrows the search space from every endpoint to the handful that never asked the
-question at all.
+An endpoint with a resource-based policy passes; proving that policy right is your tests' job.
+
+The known blind spot: if your handler calls a service that reaches the principal internally via
+`IHttpContextAccessor`, the handler's own IL never mentions it, and AuthzProbe will report AZP002.
+Ownership checks that happen one level down the call graph are not followed.
 
 ## Try it
 

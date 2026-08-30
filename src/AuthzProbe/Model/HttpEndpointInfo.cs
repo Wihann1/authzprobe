@@ -44,6 +44,12 @@ public sealed record HttpEndpointInfo
     public IReadOnlyList<string> PolicyRequirements { get; init; } = [];
 
     /// <summary>
+    /// What the handler's own code says about whether it can scope to the caller.
+    /// See <see cref="Scanning.HandlerPrincipalInspector"/>.
+    /// </summary>
+    public HandlerInspection Handler { get; init; } = HandlerInspection.Unknown;
+
+    /// <summary>
     /// True when authorization asks for something beyond "the caller is signed in".
     /// A bare <c>DenyAnonymousAuthorizationRequirement</c> does not count.
     /// </summary>

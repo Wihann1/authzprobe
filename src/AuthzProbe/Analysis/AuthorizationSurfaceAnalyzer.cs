@@ -127,28 +127,56 @@ public static class AuthorizationSurfaceAnalyzer
             yield break;
         }
 
-        // AZP002 — the IDOR shape. Authenticated, but nothing ties the caller to the object.
+        // No declarative scoping. Whether that is a defect depends on what the handler
+        // itself can see, so split on that rather than reporting everything at once.
         if (endpoint.Policies.Count == 0
             && endpoint.Roles.Count == 0
             && !endpoint.HasSubstantiveRequirement)
         {
+            // AZP005 — either the handler touches the principal and may be checking
+            // ownership in its body, or we could not read it at all. Neither supports
+            // the claim AZP002 makes, so both go to the review list.
+            if (endpoint.Handler is HandlerInspection.PrincipalAware or HandlerInspection.Unknown)
+            {
+                yield return new Finding
+                {
+                    Code = FindingCodes.UnverifiedResourceAccess,
+                    Severity = FindingSeverity.Info,
+                    Title = "Object-addressing endpoint scopes access in the handler, not declaratively",
+                    Detail =
+                        "The endpoint takes an object identifier and carries no resource-based policy, "
+                        + "but its handler either references the authenticated principal — so it may well "
+                        + "be enforcing ownership in its body — or could not be inspected. AuthzProbe "
+                        + "cannot tell whether a check exists or whether it is the right one. "
+                        + "This is a review list, not a defect list.",
+                    Endpoint = name,
+                    Remediation =
+                        "Confirm the handler filters by the caller rather than merely reading their "
+                        + "identity. Moving the check into a resource-based policy makes it verifiable."
+                };
+
+                yield break;
+            }
+
+            // AZP002 — the handler never references the caller, so it cannot be filtering
+            // by them. This is the high-confidence case.
             yield return new Finding
             {
                 Code = FindingCodes.UnscopedResourceAccess,
                 Severity = options.TreatUnscopedResourceAccessAsError
                     ? FindingSeverity.Error
                     : FindingSeverity.Warning,
-                Title = "Object-addressing endpoint requires only an authenticated user",
+                Title = "Object-addressing endpoint cannot be scoping to the caller",
                 Detail =
-                    "The endpoint takes an identifier that addresses a stored object, but authorization "
-                    + "stops at 'is this caller signed in'. Nothing here ties the caller to the object, "
-                    + "so any authenticated user can substitute another user's identifier. "
-                    + "This is broken object level authorization (OWASP API1) — the defect class that "
-                    + "compiles cleanly and passes tests.",
+                    "The endpoint takes an identifier that addresses a stored object, authorization stops "
+                    + "at 'is this caller signed in', and the handler's own code never references the "
+                    + "authenticated principal. It therefore has no way to know who is calling and cannot "
+                    + "be filtering by them, so any authenticated user can substitute another user's "
+                    + "identifier. This is broken object level authorization (OWASP API1).",
                 Endpoint = name,
                 Remediation =
                     "Enforce ownership server-side: derive the owner from the authenticated principal "
-                    + "rather than the request, or apply a resource-based policy via IAuthorizationService."
+                    + "rather than the request, or apply a resource-based policy via IAuthorizationService.",
             };
 
             yield break;

@@ -19,8 +19,17 @@ public static class FindingCodes
     /// <summary>Endpoint is reachable without authentication because nothing opted it in.</summary>
     public const string ImplicitlyAnonymous = "AZP001";
 
-    /// <summary>Endpoint addresses a specific object but only requires "any authenticated user".</summary>
+    /// <summary>
+    /// Endpoint addresses a specific object, requires only "any authenticated user",
+    /// and its handler never references the caller — so it cannot be scoping to them.
+    /// </summary>
     public const string UnscopedResourceAccess = "AZP002";
+
+    /// <summary>
+    /// Endpoint addresses a specific object with no declarative scoping, but its handler
+    /// does reference the caller. Possibly correct; needs a human to confirm.
+    /// </summary>
+    public const string UnverifiedResourceAccess = "AZP005";
 
     /// <summary>Endpoint is explicitly anonymous and addresses a specific object.</summary>
     public const string AnonymousResourceAccess = "AZP003";
