@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release --verbosity normal
+
+      - name: Pack
+        run: dotnet pack src/AuthzProbe/AuthzProbe.csproj --no-build -c Release
+
+      # The sample API seeds four deliberate authorization defects. If the probe
+      # stops finding them, the tool is broken even though every unit test passes.
+      - name: Probe detects the seeded defects
+        run: |
+          if dotnet run --project samples/SampleApi -c Release --no-build -- --probe-only; then
+            echo "::error::AuthzProbe reported a clean surface, but the sample seeds four defects."
+            exit 1
+          else
+            echo "Probe correctly failed on the deliberately vulnerable sample."
+          fi
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: src/AuthzProbe/bin/Release/*.nupkg
+          if-no-files-found: error

@@ -1,5 +1,10 @@
 # AuthzProbe
 
+[![CI](https://github.com/Wihann1/authzprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/Wihann1/authzprobe/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/AuthzProbe.svg)](https://www.nuget.org/packages/AuthzProbe)
+[![Downloads](https://img.shields.io/nuget/dt/AuthzProbe.svg)](https://www.nuget.org/packages/AuthzProbe)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Fails your build when an ASP.NET Core endpoint can be pointed at somebody else's data.**
 
 ```
