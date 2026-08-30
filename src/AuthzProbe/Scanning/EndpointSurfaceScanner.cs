@@ -1,3 +1,4 @@
+using System.Reflection;
 using AuthzProbe.Model;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
@@ -112,7 +113,8 @@ public static class EndpointSurfaceScanner
                 Roles = roles,
                 RouteParameters = parameters,
                 ExposesResourceIdentifier =
-                    parameters.Any(ResourceIdentifierHeuristics.LooksLikeResourceIdentifier)
+                    parameters.Any(ResourceIdentifierHeuristics.LooksLikeResourceIdentifier),
+                Handler = HandlerPrincipalInspector.Inspect(metadata.GetMetadata<MethodInfo>())
             });
         }
 

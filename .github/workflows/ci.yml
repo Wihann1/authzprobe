@@ -32,6 +32,15 @@ jobs:
       - name: Test
         run: dotnet test --no-build -c Release --verbosity normal
 
+      # A tool that finds security defects should not ship a repo that has them.
+      - name: Fail on vulnerable dependencies
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee audit.txt
+          if grep -q "has the following vulnerable packages" audit.txt; then
+            echo "::error::Vulnerable dependencies found."
+            exit 1
+          fi
+
       - name: Pack
         run: dotnet pack src/AuthzProbe/AuthzProbe.csproj --no-build -c Release
 

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
 namespace SampleApi;
@@ -42,6 +43,11 @@ public static class VulnerableEndpoints
         // --- clean: a resource-based policy is doing the ownership check -------------------
         app.MapGet("/api/secure-invoices/{id:guid}", (Guid id) => Results.Ok(new { id }))
            .RequireAuthorization("InvoiceOwner");
+
+        // --- AZP005: no declarative scoping, but the handler does read the caller ---------
+        app.MapGet("/api/statements/{statementId}", (string statementId, HttpContext ctx) =>
+                Results.Ok(new { statementId, owner = ctx.User.Identity?.Name }))
+           .RequireAuthorization();
 
         // --- clean: pagination parameters are not object identifiers ----------------------
         app.MapGet("/api/invoices", (int page, int pageSize) => Results.Ok(new { page, pageSize }))

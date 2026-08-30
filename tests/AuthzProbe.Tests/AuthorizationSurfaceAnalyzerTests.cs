@@ -37,7 +37,7 @@ public class AuthorizationSurfaceAnalyzerTests
 
         var endpoints = EndpointSurfaceScanner.Scan(app);
 
-        Assert.Equal(9, endpoints.Count);
+        Assert.Equal(10, endpoints.Count);
     }
 
     [Fact]
@@ -76,6 +76,84 @@ public class AuthorizationSurfaceAnalyzerTests
         var report = AnalyzeSample();
 
         Assert.DoesNotContain("GET /api/secure-invoices/{id:guid}", report.Findings.Select(f => f.Endpoint));
+    }
+
+    [Fact]
+    public void Downgrades_to_review_when_the_handler_reads_the_principal()
+    {
+        // The handler takes HttpContext and reads ctx.User, so it may be scoping
+        // ownership in its body. That is a review item, not a defect.
+        var report = AnalyzeSample();
+
+        var finding = Assert.Single(report.Findings, f => f.Code == FindingCodes.UnverifiedResourceAccess);
+        Assert.Equal("GET /api/statements/{statementId}", finding.Endpoint);
+        Assert.Equal(FindingSeverity.Info, finding.Severity);
+    }
+
+    [Fact]
+    public void Handler_that_reads_the_principal_is_detected_as_principal_aware()
+    {
+        var app = BuildSampleApp();
+
+        var endpoint = EndpointSurfaceScanner.Scan(app)
+            .Single(e => e.RoutePattern == "/api/statements/{statementId}");
+
+        Assert.Equal(HandlerInspection.PrincipalAware, endpoint.Handler);
+    }
+
+    [Fact]
+    public void Handler_that_ignores_the_principal_is_detected_as_principal_blind()
+    {
+        var app = BuildSampleApp();
+
+        var endpoint = EndpointSurfaceScanner.Scan(app)
+            .Single(e => e.RoutePattern == "/api/invoices/{id:guid}");
+
+        Assert.Equal(HandlerInspection.PrincipalBlind, endpoint.Handler);
+    }
+
+    [Fact]
+    public void An_uninspectable_handler_is_reported_for_review_not_as_a_defect()
+    {
+        // Unknown is not evidence of absence. Claiming AZP002 here would present a
+        // possibly-safe endpoint as a confirmed authorization defect.
+        var endpoint = new HttpEndpointInfo
+        {
+            DisplayName = "GET /api/things/{id}",
+            RoutePattern = "api/things/{id}",
+            HttpMethods = ["GET"],
+            RequiresAuthorization = true,
+            ExposesResourceIdentifier = true,
+            RouteParameters = ["id"],
+            Handler = HandlerInspection.Unknown
+        };
+
+        var report = AuthorizationSurfaceAnalyzer.Analyze([endpoint]);
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(FindingCodes.UnverifiedResourceAccess, finding.Code);
+        Assert.Equal(FindingSeverity.Info, finding.Severity);
+    }
+
+    [Fact]
+    public void A_principal_blind_handler_is_reported_as_a_defect()
+    {
+        var endpoint = new HttpEndpointInfo
+        {
+            DisplayName = "GET /api/things/{id}",
+            RoutePattern = "api/things/{id}",
+            HttpMethods = ["GET"],
+            RequiresAuthorization = true,
+            ExposesResourceIdentifier = true,
+            RouteParameters = ["id"],
+            Handler = HandlerInspection.PrincipalBlind
+        };
+
+        var report = AuthorizationSurfaceAnalyzer.Analyze([endpoint]);
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(FindingCodes.UnscopedResourceAccess, finding.Code);
+        Assert.Equal(FindingSeverity.Warning, finding.Severity);
     }
 
     [Fact]
@@ -155,7 +233,7 @@ public class AuthorizationSurfaceAnalyzerTests
         var markdown = report.ToMarkdown();
 
         Assert.Contains("# AuthzProbe report", markdown);
-        Assert.Contains("Endpoints scanned: **9**", markdown);
+        Assert.Contains("Endpoints scanned: **10**", markdown);
         Assert.Contains(FindingCodes.UnscopedResourceAccess, markdown);
         Assert.Contains("**FAIL**", markdown);
     }
