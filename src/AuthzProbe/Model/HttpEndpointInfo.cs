@@ -57,12 +57,6 @@ public sealed record HttpEndpointInfo
         PolicyRequirements.Any(r =>
             !string.Equals(r, "DenyAnonymousAuthorizationRequirement", StringComparison.Ordinal));
 
-    /// <summary>
-    /// Effective reachability: an endpoint is anonymously reachable when it either
-    /// opts out explicitly, or simply never opted in.
-    /// </summary>
-    public bool IsAnonymouslyReachable => AllowsAnonymous || !RequiresAuthorization;
-
     /// <summary>Method-and-route form, e.g. <c>GET /api/invoices/{id}</c>.</summary>
     public override string ToString()
     {
