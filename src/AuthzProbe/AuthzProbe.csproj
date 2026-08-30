@@ -19,7 +19,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <!-- Your GitHub handle. If it differs from your NuGet name, change it here only. -->
-    <GitHubOwner>wihann</GitHubOwner>
+    <GitHubOwner>Wihann1</GitHubOwner>
     <PackageProjectUrl>https://github.com/$(GitHubOwner)/authzprobe</PackageProjectUrl>
     <RepositoryUrl>https://github.com/$(GitHubOwner)/authzprobe</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
