@@ -92,11 +92,20 @@ question at all.
 
 ## Try it
 
+From the repository root:
+
 ```bash
+cd authzprobe
 dotnet run --project samples/SampleApi -- --probe-only
 ```
 
 The sample maps nine endpoints — four defective, five clean — and exits non-zero.
+
+Run the tests the same way:
+
+```bash
+dotnet test
+```
 
 ## Targets
 
