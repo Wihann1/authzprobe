@@ -318,23 +318,28 @@ public static class AuthorizationSurfaceAnalyzer
             yield break;
         }
 
-        // AZP002 — the handler never references the caller, so it cannot be filtering
-        // by them. This is the high-confidence case.
+        // AZP002 — nothing observable scopes this endpoint to the caller. This is the
+        // highest-confidence case the tool has, which is not the same as certainty: the
+        // wording states what was observed and leaves the conclusion to the reader.
         yield return new Finding
         {
             Code = FindingCodes.UnscopedResourceAccess,
             Severity = options.TreatUnscopedResourceAccessAsError
                 ? FindingSeverity.Error
                 : FindingSeverity.Warning,
-            Title = "Object-addressing endpoint cannot be scoping to the caller",
+            Title = "Object-addressing endpoint shows no sign of scoping to the caller",
             Detail =
-                "The endpoint takes an identifier that addresses a stored object, the authorization "
-                + "it enforces stops at 'is this caller signed in', and the handler's own code never "
-                + "references the authenticated principal. It therefore has no way to know who is "
-                + "calling and cannot be filtering by them, so any authenticated user can substitute "
-                + "another user's identifier. This is broken object level authorization (OWASP API1). "
-                + "Note that a policy is judged by the requirements it actually carries, so a named "
-                + "policy that only calls RequireAuthenticatedUser is reported here.",
+                "Three things were observed. The endpoint takes an identifier that addresses a "
+                + "stored object. The authorization it enforces stops at 'is this caller signed in' "
+                + "— a policy is judged by the requirements it carries, so one that only calls "
+                + "RequireAuthenticatedUser counts as nothing more. And neither the handler's own "
+                + "code nor the methods it calls directly reference the authenticated principal. "
+                + "Together those are the shape of broken object level authorization (OWASP API1), "
+                + "where one authenticated user substitutes another's identifier. "
+                + "This is a finding to check, not a proven vulnerability: ownership enforced "
+                + "through an injected service, further down the call graph, or by middleware or a "
+                + "gateway outside this application is invisible here and would make this a false "
+                + "positive. See the limitations in the README.",
             Endpoint = name,
             Remediation =
                 "Enforce ownership server-side: derive the owner from the authenticated principal "
