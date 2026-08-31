@@ -3,12 +3,7 @@ using SampleApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddAuthentication();
-builder.Services.AddAuthorization(options =>
-{
-    // Stands in for a real resource-based policy.
-    options.AddPolicy("InvoiceOwner", policy => policy.RequireAuthenticatedUser());
-});
+builder.Services.AddVulnerableApi();
 
 var app = builder.Build();
 

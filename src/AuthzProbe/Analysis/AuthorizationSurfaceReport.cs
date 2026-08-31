@@ -7,7 +7,7 @@ namespace AuthzProbe.Analysis;
 public sealed class AuthorizationSurfaceReport
 {
     /// <summary>Creates a report over a scanned surface and the findings raised against it.</summary>
-    /// <param name="endpoints">Every endpoint that was scanned.</param>
+    /// <param name="endpoints">Every endpoint that was analysed.</param>
     /// <param name="findings">Findings raised, in discovery order.</param>
     /// <param name="failOn">Minimum severity treated as a failure.</param>
     public AuthorizationSurfaceReport(
@@ -20,7 +20,11 @@ public sealed class AuthorizationSurfaceReport
         FailOn = failOn;
     }
 
-    /// <summary>Every endpoint that was scanned, including those that raised nothing.</summary>
+    /// <summary>
+    /// Every endpoint that was analysed, including those that raised nothing. Endpoints
+    /// excluded by <see cref="AuthzProbeOptions.IgnoredRoutePatterns"/>, and static-asset
+    /// and fallback endpoints, are not included.
+    /// </summary>
     public IReadOnlyList<HttpEndpointInfo> Endpoints { get; }
 
     /// <summary>All findings raised, at every severity.</summary>
@@ -52,7 +56,7 @@ public sealed class AuthorizationSurfaceReport
         var sb = new StringBuilder();
         sb.AppendLine("# AuthzProbe report");
         sb.AppendLine();
-        sb.AppendLine($"- Endpoints scanned: **{Endpoints.Count}**");
+        sb.AppendLine($"- Endpoints analysed: **{Endpoints.Count}**");
         sb.AppendLine($"- Findings: **{Findings.Count}** "
                       + $"({Findings.Count(f => f.Severity == FindingSeverity.Error)} error, "
                       + $"{Findings.Count(f => f.Severity == FindingSeverity.Warning)} warning, "

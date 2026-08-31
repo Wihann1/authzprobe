@@ -50,6 +50,35 @@ public sealed record HttpEndpointInfo
     public HandlerInspection Handler { get; init; } = HandlerInspection.Unknown;
 
     /// <summary>
+    /// The action behind the endpoint, e.g. <c>Home.Index</c>, when routing alone does not
+    /// identify it. Conventionally routed MVC actions all share one route template, so the
+    /// template on its own names four different endpoints identically.
+    /// </summary>
+    public string? HandlerName { get; init; }
+
+    /// <summary>
+    /// True when the endpoint serves files or routing infrastructure rather than application
+    /// data — a static asset registered by <c>MapStaticAssets</c>, or a routing fallback.
+    /// A stock MVC application registers several hundred of these, and none of them can
+    /// address a caller-owned object.
+    /// </summary>
+    public bool IsInfrastructureEndpoint { get; init; }
+
+    /// <summary>
+    /// True when the endpoint carries no authorization metadata of its own and is protected
+    /// by the application's fallback policy. Such an endpoint is not anonymous, even though
+    /// nothing is declared on it.
+    /// </summary>
+    public bool CoveredByFallbackPolicy { get; init; }
+
+    /// <summary>
+    /// True when the requirements actually enforced at runtime are known. False when a named
+    /// policy could not be resolved, in which case no conclusion may be drawn about scoping —
+    /// the policy could be doing anything.
+    /// </summary>
+    public bool AuthorizationResolved { get; init; } = true;
+
+    /// <summary>
     /// True when authorization asks for something beyond "the caller is signed in".
     /// A bare <c>DenyAnonymousAuthorizationRequirement</c> does not count.
     /// </summary>
@@ -57,13 +86,38 @@ public sealed record HttpEndpointInfo
         PolicyRequirements.Any(r =>
             !string.Equals(r, "DenyAnonymousAuthorizationRequirement", StringComparison.Ordinal));
 
-    /// <summary>Method-and-route form, e.g. <c>GET /api/invoices/{id}</c>.</summary>
+    /// <summary>
+    /// True when roles are the whole of the check. A policy carrying some other requirement
+    /// alongside the role may well be doing the ownership test.
+    /// </summary>
+    public bool RolesAreTheOnlyCheck =>
+        Roles.Count > 0
+        && PolicyRequirements.All(r =>
+            r is "DenyAnonymousAuthorizationRequirement" or "RolesAuthorizationRequirement");
+
+    /// <summary>
+    /// Method-and-route form, e.g. <c>GET /api/invoices/{id}</c>, with the action name
+    /// appended when the route template does not identify the endpoint on its own.
+    /// </summary>
     public override string ToString()
     {
         var route = "/" + (RoutePattern ?? string.Empty).TrimStart('/');
 
-        return HttpMethods.Count > 0
+        var identity = HttpMethods.Count > 0
             ? $"{string.Join(",", HttpMethods)} {route}"
             : route;
+
+        return HandlerName is not null && RouteTemplateIsShared
+            ? $"{identity} \u2192 {HandlerName}"
+            : identity;
     }
+
+    /// <summary>
+    /// True for a conventional MVC route, where one template serves every action and so
+    /// cannot identify a single endpoint.
+    /// </summary>
+    private bool RouteTemplateIsShared =>
+        RoutePattern is not null
+        && (RoutePattern.Contains("{controller", StringComparison.OrdinalIgnoreCase)
+            || RoutePattern.Contains("{action", StringComparison.OrdinalIgnoreCase));
 }

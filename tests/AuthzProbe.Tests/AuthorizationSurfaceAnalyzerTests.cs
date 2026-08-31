@@ -12,9 +12,7 @@ public class AuthorizationSurfaceAnalyzerTests
     private static WebApplication BuildSampleApp()
     {
         var builder = WebApplication.CreateBuilder();
-        builder.Services.AddAuthentication();
-        builder.Services.AddAuthorization(options =>
-            options.AddPolicy("InvoiceOwner", policy => policy.RequireAuthenticatedUser()));
+        builder.Services.AddVulnerableApi();
 
         var app = builder.Build();
         app.MapVulnerableEndpoints();
@@ -37,7 +35,7 @@ public class AuthorizationSurfaceAnalyzerTests
 
         var endpoints = EndpointSurfaceScanner.Scan(app);
 
-        Assert.Equal(10, endpoints.Count);
+        Assert.Equal(13, endpoints.Count);
     }
 
     [Fact]
@@ -59,7 +57,7 @@ public class AuthorizationSurfaceAnalyzerTests
 
         Assert.Contains("GET /api/invoices/{id:guid}", flagged);
         Assert.Contains("GET /api/tenants/{tenantId}/documents/{documentId}", flagged);
-        Assert.Equal(2, flagged.Count);
+        Assert.Equal(4, flagged.Count);
     }
 
     [Fact]
@@ -85,9 +83,12 @@ public class AuthorizationSurfaceAnalyzerTests
         // ownership in its body. That is a review item, not a defect.
         var report = AnalyzeSample();
 
-        var finding = Assert.Single(report.Findings, f => f.Code == FindingCodes.UnverifiedResourceAccess);
-        Assert.Equal("GET /api/statements/{statementId}", finding.Endpoint);
-        Assert.Equal(FindingSeverity.Info, finding.Severity);
+        var flagged = EndpointsFlagged(report, FindingCodes.UnverifiedResourceAccess).ToList();
+
+        Assert.Contains("GET /api/statements/{statementId}", flagged);
+        Assert.All(
+            report.Findings.Where(f => f.Code == FindingCodes.UnverifiedResourceAccess),
+            f => Assert.Equal(FindingSeverity.Info, f.Severity));
     }
 
     [Fact]
@@ -233,7 +234,7 @@ public class AuthorizationSurfaceAnalyzerTests
         var markdown = report.ToMarkdown();
 
         Assert.Contains("# AuthzProbe report", markdown);
-        Assert.Contains("Endpoints scanned: **10**", markdown);
+        Assert.Contains("Endpoints analysed: **12**", markdown);
         Assert.Contains(FindingCodes.UnscopedResourceAccess, markdown);
         Assert.Contains("**FAIL**", markdown);
     }
