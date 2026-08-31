@@ -188,6 +188,18 @@ per file, and an earlier version of this tool reported **385 findings on a stock
 380 of them about `bootstrap.css`**. Unit tests were all green at the time. The corpus is what
 catches that class of mistake.
 
+Templates are small by design, so they show the rules do not misfire rather than that they find
+anything. [**docs/real-world.md**](docs/real-world.md) is the other half: a run against
+Microsoft's eShopOnWeb reference application — 78 endpoints across two projects, installed as a
+package and attached without modifying a line of its source.
+
+It found `/Admin` served anonymously despite `[Authorize(Roles = ADMINISTRATORS)]` sitting on the
+page's model class. The `.cshtml` has no `@model` directive, so the page never binds to that
+model and the attribute never reaches the endpoint — confirmed with `GET /Admin` returning 200
+while two genuinely protected pages returned 302 to the login page. An analyzer reading source
+concludes that page is administrators-only, because the attribute is present and the names match.
+It is only false at runtime.
+
 ## What it does not do
 
 It reports where the ownership check is *missing*, not whether a check that exists is *correct*.
