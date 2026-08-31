@@ -36,6 +36,12 @@ public static class FindingCodes
 
     /// <summary>Endpoint addresses a specific object and is guarded only by a role check.</summary>
     public const string RoleOnlyResourceAccess = "AZP004";
+
+    /// <summary>
+    /// Endpoint takes an object identifier in its request body rather than its route, and
+    /// nothing scopes it to the caller.
+    /// </summary>
+    public const string BodyResourceAccess = "AZP006";
 }
 
 /// <summary>A single problem found in the authorization surface.</summary>
@@ -58,6 +64,13 @@ public sealed record Finding
 
     /// <summary>What to actually do about it.</summary>
     public string? Remediation { get; init; }
+
+    /// <summary>
+    /// The specifics for this one endpoint, such as which identifiers were found. Findings are
+    /// reported grouped by code under a shared <see cref="Detail"/>, so anything true of only
+    /// one endpoint belongs here rather than there.
+    /// </summary>
+    public string? Evidence { get; init; }
 
     /// <summary>Single-line form, suitable for console and CI output.</summary>
     public override string ToString() =>

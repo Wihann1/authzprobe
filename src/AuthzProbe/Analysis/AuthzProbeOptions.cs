@@ -7,13 +7,22 @@ namespace AuthzProbe.Analysis;
 public sealed class AuthzProbeOptions
 {
     /// <summary>
-    /// Route patterns that are legitimately public. Supports <c>*</c> as a wildcard,
-    /// e.g. <c>"health*"</c>, <c>"swagger/*"</c>.
+    /// Route patterns that are legitimately public. A pattern is an anchored glob over the
+    /// whole route, with <c>*</c> matching any run of characters — so <c>"health*"</c> matches
+    /// <c>health/ready</c> but not <c>api/health</c>, for which you would write <c>"*health*"</c>.
     /// </summary>
+    /// <remarks>
+    /// The defaults are deliberately narrow. Over-ignoring is the worse failure for a security
+    /// tool: a bare <c>"*health*"</c> would also hide <c>api/patient-health-records/{id}</c>,
+    /// so the health entries match the naming conventions actually used for probes instead.
+    /// </remarks>
     public IList<string> IgnoredRoutePatterns { get; } = new List<string>
     {
         "health*",
         "healthz*",
+        "*health-check*",
+        "*health_check*",
+        "*healthcheck*",
         "swagger*",
         "openapi*",
         ".well-known/*",
@@ -42,6 +51,12 @@ public sealed class AuthzProbeOptions
     /// files rather than application data, so they are excluded by default.
     /// </summary>
     public bool IncludeInfrastructureEndpoints { get; set; }
+
+    /// <summary>
+    /// Findings the codebase already has, which do not fail the build. Adopting the tool on an
+    /// existing application is otherwise all-or-nothing.
+    /// </summary>
+    public AuthzProbeBaseline? Baseline { get; set; }
 
     internal bool IsIgnored(string? routePattern)
     {

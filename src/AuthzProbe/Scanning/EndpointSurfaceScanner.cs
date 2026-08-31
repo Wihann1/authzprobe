@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -112,17 +113,38 @@ public static class EndpointSurfaceScanner
         metadata.Any(m => InfrastructureMetadataTypes.Contains(m.GetType().FullName, StringComparer.Ordinal));
 
     /// <summary>
-    /// Finds the method that actually runs for an endpoint.
+    /// Finds the methods that actually run for an endpoint.
     /// </summary>
     /// <remarks>
-    /// Minimal APIs put the delegate's <see cref="MethodInfo"/> straight into endpoint
-    /// metadata. Controllers do not: they carry a <c>ControllerActionDescriptor</c> instead,
-    /// and reading only the former leaves every controller action uninspectable — which
-    /// would quietly downgrade the whole of MVC to a review list.
+    /// Each of the three routing styles hides the handler somewhere different. Minimal APIs
+    /// put the delegate's <see cref="MethodInfo"/> straight into endpoint metadata.
+    /// Controllers carry a <c>ControllerActionDescriptor</c> instead. Razor Pages carry a
+    /// <c>CompiledPageActionDescriptor</c> holding one method per handler — <c>OnGet</c>,
+    /// <c>OnPost</c> and friends. Reading only the first leaves controllers and pages
+    /// uninspectable, which quietly downgrades most of a real application to a review list.
     /// </remarks>
-    private static MethodInfo? FindHandlerMethod(EndpointMetadataCollection metadata) =>
-        metadata.GetMetadata<MethodInfo>()
-        ?? metadata.GetMetadata<ControllerActionDescriptor>()?.MethodInfo;
+    private static IReadOnlyCollection<MethodInfo> FindHandlerMethods(EndpointMetadataCollection metadata)
+    {
+        if (metadata.GetMetadata<MethodInfo>() is { } method)
+        {
+            return [method];
+        }
+
+        if (metadata.GetMetadata<ControllerActionDescriptor>()?.MethodInfo is { } action)
+        {
+            return [action];
+        }
+
+        if (metadata.GetMetadata<CompiledPageActionDescriptor>()?.HandlerMethods is { } handlers)
+        {
+            return handlers
+                .Select(h => h.MethodInfo)
+                .Where(m => m is not null)
+                .ToArray();
+        }
+
+        return [];
+    }
 
     /// <summary>Names the action behind a controller endpoint, e.g. <c>Home.Index</c>.</summary>
     private static string? FindHandlerName(EndpointMetadataCollection metadata) =>
@@ -188,6 +210,9 @@ public static class EndpointSurfaceScanner
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
+        var handlers = FindHandlerMethods(metadata);
+        var identifiers = HandlerParameterInspector.Inspect(handlers, parameters);
+
         return new HttpEndpointInfo
         {
             DisplayName = route.DisplayName ?? pattern ?? "(unnamed endpoint)",
@@ -204,8 +229,11 @@ public static class EndpointSurfaceScanner
             Roles = roles,
             RouteParameters = parameters,
             ExposesResourceIdentifier =
-                parameters.Any(ResourceIdentifierHeuristics.LooksLikeResourceIdentifier),
-            Handler = HandlerPrincipalInspector.Inspect(FindHandlerMethod(metadata))
+                parameters.Any(ResourceIdentifierHeuristics.LooksLikeResourceIdentifier)
+                || identifiers.Query.Count > 0,
+            QueryIdentifiers = identifiers.Query,
+            BodyIdentifiers = identifiers.Body,
+            Handler = HandlerPrincipalInspector.InspectAll(handlers)
         };
     }
 }

@@ -32,6 +32,42 @@ public static class HandlerPrincipalInspector
         "get_User", "AuthorizeAsync", "get_HttpContext"
     ];
 
+    /// <summary>
+    /// How many called methods are followed one level deep. A handler calling more distinct
+    /// application methods than this is doing too much to reason about anyway.
+    /// </summary>
+    private const int MaxCalleesFollowed = 64;
+
+    /// <summary>
+    /// Inspects several handler methods that share one endpoint, as a Razor Page's
+    /// <c>OnGet</c>/<c>OnPost</c> handlers do.
+    /// </summary>
+    /// <remarks>
+    /// One aware handler makes the endpoint aware: the conservative reading is the one that
+    /// avoids claiming a defect. Only when every handler was read and none touches the caller
+    /// is the endpoint blind.
+    /// </remarks>
+    public static HandlerInspection InspectAll(IReadOnlyCollection<MethodInfo> handlers)
+    {
+        ArgumentNullException.ThrowIfNull(handlers);
+
+        if (handlers.Count == 0)
+        {
+            return HandlerInspection.Unknown;
+        }
+
+        var results = handlers.Select(Inspect).ToArray();
+
+        if (results.Any(r => r is HandlerInspection.PrincipalAware))
+        {
+            return HandlerInspection.PrincipalAware;
+        }
+
+        return results.All(r => r is HandlerInspection.PrincipalBlind)
+            ? HandlerInspection.PrincipalBlind
+            : HandlerInspection.Unknown;
+    }
+
     /// <summary>Inspects the handler behind an endpoint.</summary>
     public static HandlerInspection Inspect(MethodInfo? handler)
     {
@@ -78,9 +114,17 @@ public static class HandlerPrincipalInspector
         // A partial walk that missed a principal reference would report PrincipalBlind and
         // present a possibly-safe endpoint as a high-confidence defect. Only claim
         // "blind" when the whole body was read successfully.
-        var (found, complete) = ReferencesPrincipal(target, il);
+        var (members, complete) = ResolveReferencedMembers(target, il);
 
-        if (found)
+        if (members.Any(IsPrincipalReference))
+        {
+            return HandlerInspection.PrincipalAware;
+        }
+
+        // A handler often delegates the ownership check to a helper it calls directly. One
+        // hop covers that without pretending to be a call-graph analyser: if a method this
+        // handler calls touches the principal, the handler can be scoping through it.
+        if (CallsPrincipalAwareMethod(members))
         {
             return HandlerInspection.PrincipalAware;
         }
@@ -88,58 +132,143 @@ public static class HandlerPrincipalInspector
         return complete ? HandlerInspection.PrincipalBlind : HandlerInspection.Unknown;
     }
 
+    /// <summary>
+    /// Follows calls the handler makes, one level deep, looking for a principal reference in
+    /// the callee.
+    /// </summary>
+    /// <remarks>
+    /// Only methods with a readable body are followed, which means a call through an interface
+    /// is not: the interface method has no body, and choosing an implementation would require
+    /// knowing the container's registrations. A service reached through an injected interface
+    /// therefore remains the documented blind spot, one hop or not.
+    /// </remarks>
+    private static bool CallsPrincipalAwareMethod(IReadOnlyList<MemberInfo> members)
+    {
+        var examined = 0;
+
+        foreach (var member in members)
+        {
+            if (examined >= MaxCalleesFollowed)
+            {
+                return false;
+            }
+
+            if (member is not MethodInfo callee || !IsApplicationMethod(callee))
+            {
+                continue;
+            }
+
+            var body = BodyOf(Unwrap(callee));
+
+            if (body is null || body.Length == 0)
+            {
+                continue;
+            }
+
+            examined++;
+
+            var (calleeMembers, _) = ResolveReferencedMembers(Unwrap(callee), body);
+
+            if (calleeMembers.Any(IsPrincipalReference))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>An async or iterator method's real body lives in its state machine.</summary>
+    private static MethodInfo Unwrap(MethodInfo method)
+    {
+        var stateMachine = method.GetCustomAttribute<AsyncStateMachineAttribute>()?.StateMachineType
+                           ?? method.GetCustomAttribute<IteratorStateMachineAttribute>()?.StateMachineType;
+
+        if (stateMachine is null)
+        {
+            return method;
+        }
+
+        return stateMachine.GetMethod(
+            "MoveNext",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public) ?? method;
+    }
+
+    private static byte[]? BodyOf(MethodInfo method)
+    {
+        try
+        {
+            return method.GetMethodBody()?.GetILAsByteArray();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// True for a method belonging to the application. Following framework methods would walk
+    /// most of the base class library to no purpose — a framework method that exposes the
+    /// principal is already matched directly by name.
+    /// </summary>
+    private static bool IsApplicationMethod(MethodInfo method)
+    {
+        var ns = method.DeclaringType?.Namespace ?? string.Empty;
+
+        return !ns.StartsWith("System", StringComparison.Ordinal)
+               && !ns.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal)
+               && !ns.StartsWith("Microsoft.Extensions", StringComparison.Ordinal);
+    }
+
+    private static bool IsPrincipalReference(MemberInfo member)
+    {
+        if (PrincipalMemberNames.Contains(member.Name, StringComparer.Ordinal))
+        {
+            return true;
+        }
+
+        if (member is Type type && IsPrincipalType(type))
+        {
+            return true;
+        }
+
+        return member.DeclaringType is { } declaring && IsPrincipalType(declaring);
+    }
+
     private static bool IsPrincipalType(Type type) =>
         PrincipalTypeNames.Contains(type.Name, StringComparer.Ordinal)
         || string.Equals(type.Name, "HttpContext", StringComparison.Ordinal);
 
     /// <summary>
-    /// Returns whether a principal reference was found, and whether the whole body was
+    /// Resolves the members an IL body references, and reports whether the whole body was
     /// walked. An incomplete walk cannot support a negative conclusion.
     /// </summary>
-    private static (bool Found, bool Complete) ReferencesPrincipal(MethodInfo method, byte[] il)
+    private static (IReadOnlyList<MemberInfo> Members, bool Complete) ResolveReferencedMembers(
+        MethodInfo method, byte[] il)
     {
         var module = method.Module;
         var typeArgs = SafeGenericArguments(method.DeclaringType);
         var methodArgs = method.IsGenericMethodDefinition ? method.GetGenericArguments() : [];
 
         var (tokens, complete) = WalkTokens(il);
+        var members = new List<MemberInfo>(tokens.Count);
 
         foreach (var token in tokens)
         {
-            MemberInfo? member;
             try
             {
-                member = module.ResolveMember(token, typeArgs, methodArgs);
+                if (module.ResolveMember(token, typeArgs, methodArgs) is { } member)
+                {
+                    members.Add(member);
+                }
             }
             catch (Exception)
             {
                 // Tokens from other modules or malformed reads: skip, don't fail the scan.
-                continue;
-            }
-
-            if (member is null)
-            {
-                continue;
-            }
-
-            if (PrincipalMemberNames.Contains(member.Name, StringComparer.Ordinal))
-            {
-                return (true, complete);
-            }
-
-            if (member is Type t && IsPrincipalType(t))
-            {
-                return (true, complete);
-            }
-
-            var declaring = member.DeclaringType;
-            if (declaring is not null && IsPrincipalType(declaring))
-            {
-                return (true, complete);
             }
         }
 
-        return (false, complete);
+        return (members, complete);
     }
 
     private static Type[] SafeGenericArguments(Type? type)
