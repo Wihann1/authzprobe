@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Hosting;
 using SampleApi;
 
@@ -284,12 +286,18 @@ public class EffectiveAuthorizationTests
     [Fact]
     public async Task Scanning_through_the_service_provider_resolves_policies_too()
     {
-        var app = BuildApp(
-            authorization: o => o.AddPolicy("MustOwnTheRecord", p => p.RequireAuthenticatedUser()),
-            map: a => a.MapGet("/api/invoices/{id}", (string id) => Results.Ok(new { id }))
-                       .RequireAuthorization("MustOwnTheRecord"));
+        // The composite EndpointDataSource is only populated once the host starts, so this
+        // overload cannot be covered without starting one. TestServer does it in memory.
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthentication();
+        builder.Services.AddAuthorization(o =>
+            o.AddPolicy("MustOwnTheRecord", p => p.RequireAuthenticatedUser()));
 
-        // Force the composite data source to be built, as running the app would.
+        var app = builder.Build();
+        app.MapGet("/api/invoices/{id}", (string id) => Results.Ok(new { id }))
+           .RequireAuthorization("MustOwnTheRecord");
+
         await app.StartAsync();
 
         try
