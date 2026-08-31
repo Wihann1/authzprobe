@@ -44,12 +44,13 @@ jobs:
       - name: Pack
         run: dotnet pack src/AuthzProbe/AuthzProbe.csproj --no-build -c Release
 
-      # The sample API seeds four deliberate authorization defects. If the probe
-      # stops finding them, the tool is broken even though every unit test passes.
+      # The sample API seeds deliberate authorization defects across both minimal APIs
+      # and controllers. If the probe stops finding them, the tool is broken even though
+      # every unit test passes.
       - name: Probe detects the seeded defects
         run: |
-          if dotnet run --project samples/SampleApi -c Release --no-build -- --probe-only; then
-            echo "::error::AuthzProbe reported a clean surface, but the sample seeds four defects."
+          if dotnet run --project samples/SampleApi -c Release --no-build -f net9.0 -- --probe-only; then
+            echo "::error::AuthzProbe reported a clean surface, but the sample seeds real defects."
             exit 1
           else
             echo "Probe correctly failed on the deliberately vulnerable sample."

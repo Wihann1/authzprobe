@@ -56,6 +56,7 @@ public static class AuthorizationSurfaceAnalyzer
         options ??= new AuthzProbeOptions();
 
         var findings = new List<Finding>();
+        var analysed = new List<HttpEndpointInfo>();
 
         foreach (var endpoint in endpoints)
         {
@@ -63,6 +64,13 @@ public static class AuthorizationSurfaceAnalyzer
             {
                 continue;
             }
+
+            if (endpoint.IsInfrastructureEndpoint && !options.IncludeInfrastructureEndpoints)
+            {
+                continue;
+            }
+
+            analysed.Add(endpoint);
 
             foreach (var finding in Evaluate(endpoint, options))
             {
@@ -73,7 +81,7 @@ public static class AuthorizationSurfaceAnalyzer
             }
         }
 
-        return new AuthorizationSurfaceReport(endpoints, findings, options.FailOn);
+        return new AuthorizationSurfaceReport(analysed, findings, options.FailOn);
     }
 
     private static IEnumerable<Finding> Evaluate(HttpEndpointInfo endpoint, AuthzProbeOptions options)
@@ -81,7 +89,9 @@ public static class AuthorizationSurfaceAnalyzer
         var name = endpoint.ToString();
 
         // AZP001 — nothing opted this endpoint in. The most common cause of a wide-open API
-        // is not a wrong policy, it's a missing attribute on a new controller.
+        // is not a wrong policy, it's a missing attribute on a new controller. An endpoint
+        // covered by the application's fallback policy is not in this category: the scanner
+        // reports it as requiring authorization, because that is what the middleware enforces.
         if (!endpoint.RequiresAuthorization && !endpoint.AllowsAnonymous)
         {
             yield return new Finding
@@ -90,9 +100,10 @@ public static class AuthorizationSurfaceAnalyzer
                 Severity = FindingSeverity.Error,
                 Title = "Endpoint is reachable without authentication",
                 Detail =
-                    "The endpoint carries no authorization metadata and no explicit [AllowAnonymous]. "
-                    + "It is anonymous by omission rather than by decision, so nothing distinguishes it "
-                    + "from an endpoint someone forgot to protect.",
+                    "The endpoint carries no authorization metadata and no explicit [AllowAnonymous], "
+                    + "and the application configures no fallback policy to catch it. It is anonymous "
+                    + "by omission rather than by decision, so nothing distinguishes it from an endpoint "
+                    + "someone forgot to protect.",
                 Endpoint = name,
                 Remediation =
                     "Add [Authorize] (or RequireAuthorization()), or add [AllowAnonymous] to record that "
@@ -127,68 +138,17 @@ public static class AuthorizationSurfaceAnalyzer
             yield break;
         }
 
-        // No declarative scoping. Whether that is a defect depends on what the handler
-        // itself can see, so split on that rather than reporting everything at once.
-        if (endpoint.Policies.Count == 0
-            && endpoint.Roles.Count == 0
-            && !endpoint.HasSubstantiveRequirement)
+        // A named policy we could not resolve could be doing anything at all. Reporting
+        // on it would be a guess in either direction, so report nothing.
+        if (!endpoint.AuthorizationResolved)
         {
-            // AZP005 — either the handler touches the principal and may be checking
-            // ownership in its body, or we could not read it at all. Neither supports
-            // the claim AZP002 makes, so both go to the review list.
-            if (endpoint.Handler is HandlerInspection.PrincipalAware or HandlerInspection.Unknown)
-            {
-                yield return new Finding
-                {
-                    Code = FindingCodes.UnverifiedResourceAccess,
-                    Severity = FindingSeverity.Info,
-                    Title = "Object-addressing endpoint scopes access in the handler, not declaratively",
-                    Detail =
-                        "The endpoint takes an object identifier and carries no resource-based policy, "
-                        + "but its handler either references the authenticated principal — so it may well "
-                        + "be enforcing ownership in its body — or could not be inspected. AuthzProbe "
-                        + "cannot tell whether a check exists or whether it is the right one. "
-                        + "This is a review list, not a defect list.",
-                    Endpoint = name,
-                    Remediation =
-                        "Confirm the handler filters by the caller rather than merely reading their "
-                        + "identity. Moving the check into a resource-based policy makes it verifiable."
-                };
-
-                yield break;
-            }
-
-            // AZP002 — the handler never references the caller, so it cannot be filtering
-            // by them. This is the high-confidence case.
-            yield return new Finding
-            {
-                Code = FindingCodes.UnscopedResourceAccess,
-                Severity = options.TreatUnscopedResourceAccessAsError
-                    ? FindingSeverity.Error
-                    : FindingSeverity.Warning,
-                Title = "Object-addressing endpoint cannot be scoping to the caller",
-                Detail =
-                    "The endpoint takes an identifier that addresses a stored object, authorization stops "
-                    + "at 'is this caller signed in', and the handler's own code never references the "
-                    + "authenticated principal. It therefore has no way to know who is calling and cannot "
-                    + "be filtering by them, so any authenticated user can substitute another user's "
-                    + "identifier. This is broken object level authorization (OWASP API1).",
-                Endpoint = name,
-                Remediation =
-                    "Enforce ownership server-side: derive the owner from the authenticated principal "
-                    + "rather than the request, or apply a resource-based policy via IAuthorizationService.",
-            };
-
             yield break;
         }
 
         // AZP004 — a role says what kind of user you are, never which rows are yours.
         // Only raise it when roles are the *whole* check: a policy carrying some other
         // requirement alongside the role may well be doing the ownership test.
-        var rolesAreTheOnlyCheck = endpoint.PolicyRequirements.All(r =>
-            r is "DenyAnonymousAuthorizationRequirement" or "RolesAuthorizationRequirement");
-
-        if (endpoint.Policies.Count == 0 && endpoint.Roles.Count > 0 && rolesAreTheOnlyCheck)
+        if (endpoint.RolesAreTheOnlyCheck)
         {
             yield return new Finding
             {
@@ -204,6 +164,66 @@ public static class AuthorizationSurfaceAnalyzer
                     "Add a resource-based authorization check in addition to the role, unless the role is "
                     + "genuinely intended to grant access to every instance."
             };
+
+            yield break;
         }
+
+        // Authorization asks for something beyond "signed in", so it may well be the
+        // ownership check. Nothing to report.
+        if (endpoint.HasSubstantiveRequirement)
+        {
+            yield break;
+        }
+
+        // Whether "signed in and nothing more" is a defect depends on what the handler
+        // itself can see, so split on that rather than reporting everything at once.
+
+        // AZP005 — either the handler touches the principal and may be checking
+        // ownership in its body, or we could not read it at all. Neither supports
+        // the claim AZP002 makes, so both go to the review list.
+        if (endpoint.Handler is HandlerInspection.PrincipalAware or HandlerInspection.Unknown)
+        {
+            yield return new Finding
+            {
+                Code = FindingCodes.UnverifiedResourceAccess,
+                Severity = FindingSeverity.Info,
+                Title = "Object-addressing endpoint scopes access in the handler, not declaratively",
+                Detail =
+                    "The endpoint takes an object identifier and carries no resource-based policy, "
+                    + "but its handler either references the authenticated principal — so it may well "
+                    + "be enforcing ownership in its body — or could not be inspected. AuthzProbe "
+                    + "cannot tell whether a check exists or whether it is the right one. "
+                    + "This is a review list, not a defect list.",
+                Endpoint = name,
+                Remediation =
+                    "Confirm the handler filters by the caller rather than merely reading their "
+                    + "identity. Moving the check into a resource-based policy makes it verifiable."
+            };
+
+            yield break;
+        }
+
+        // AZP002 — the handler never references the caller, so it cannot be filtering
+        // by them. This is the high-confidence case.
+        yield return new Finding
+        {
+            Code = FindingCodes.UnscopedResourceAccess,
+            Severity = options.TreatUnscopedResourceAccessAsError
+                ? FindingSeverity.Error
+                : FindingSeverity.Warning,
+            Title = "Object-addressing endpoint cannot be scoping to the caller",
+            Detail =
+                "The endpoint takes an identifier that addresses a stored object, the authorization "
+                + "it enforces stops at 'is this caller signed in', and the handler's own code never "
+                + "references the authenticated principal. It therefore has no way to know who is "
+                + "calling and cannot be filtering by them, so any authenticated user can substitute "
+                + "another user's identifier. This is broken object level authorization (OWASP API1). "
+                + "Note that a policy is judged by the requirements it actually carries, so a named "
+                + "policy that only calls RequireAuthenticatedUser is reported here.",
+            Endpoint = name,
+            Remediation =
+                "Enforce ownership server-side: derive the owner from the authenticated principal "
+                + "rather than the request, or apply a resource-based policy via IAuthorizationService.",
+        };
     }
 }

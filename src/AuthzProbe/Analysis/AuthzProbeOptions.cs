@@ -15,6 +15,7 @@ public sealed class AuthzProbeOptions
         "health*",
         "healthz*",
         "swagger*",
+        "openapi*",
         ".well-known/*",
         "_framework/*",
         "error*"
@@ -35,6 +36,12 @@ public sealed class AuthzProbeOptions
     /// once the existing surface is clean, to stop new IDOR-shaped endpoints landing.
     /// </summary>
     public bool TreatUnscopedResourceAccessAsError { get; set; }
+
+    /// <summary>
+    /// When true, static-asset and routing-fallback endpoints are analysed too. They serve
+    /// files rather than application data, so they are excluded by default.
+    /// </summary>
+    public bool IncludeInfrastructureEndpoints { get; set; }
 
     internal bool IsIgnored(string? routePattern)
     {
