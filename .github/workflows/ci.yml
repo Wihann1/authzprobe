@@ -63,8 +63,13 @@ jobs:
           if-no-files-found: error
 
   corpus:
-    name: Probe the stock ASP.NET Core templates
+    name: Probe the stock templates (${{ matrix.framework }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [net8.0, net10.0]
 
     # Unit tests prove the rules behave on endpoints we wrote. This proves they behave on
     # applications we did not: Microsoft's own templates, generated fresh, probed without
@@ -81,4 +86,4 @@ jobs:
             10.0.x
 
       - name: Run the corpus
-        run: tools/corpus/run-corpus.sh --framework net10.0
+        run: tools/corpus/run-corpus.sh --framework ${{ matrix.framework }}

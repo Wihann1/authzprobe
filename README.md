@@ -171,12 +171,16 @@ hosting startup exists — so the thing being measured is a real application, un
 
 Unit tests prove the rules behave on endpoints written to exercise them, which is a low bar for
 a tool whose whole job is judging other people's code. So CI also generates the stock ASP.NET
-Core templates — `webapi`, `webapi --use-controllers`, `mvc`, `webapp` — and probes each one
-without modifying a line of its source:
+Core templates — `webapi`, `webapi --use-controllers`, `mvc`, `webapp` — on both supported
+frameworks, and probes each one without modifying a line of its source:
 
 ```bash
-tools/corpus/run-corpus.sh
+tools/corpus/run-corpus.sh --framework net8.0
+tools/corpus/run-corpus.sh --framework net10.0
 ```
+
+The templates consume AuthzProbe as a package from a local feed, not as a project reference, so
+packaging mistakes surface here too.
 
 The expectations live in [`tools/corpus/expectations.tsv`](tools/corpus/expectations.tsv), and
 the cap on analysed endpoints is the guard that matters. `MapStaticAssets` registers one endpoint
@@ -224,7 +228,7 @@ dotnet test
 And probe the stock ASP.NET Core templates, which is what CI does:
 
 ```bash
-tools/corpus/run-corpus.sh
+tools/corpus/run-corpus.sh --framework net10.0
 ```
 
 ## Targets
