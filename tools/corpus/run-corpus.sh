@@ -6,7 +6,12 @@
 # applications we did not: Microsoft's own templates, generated fresh, with no source
 # modification of any kind. The probe attaches through ASPNETCORE_HOSTINGSTARTUPASSEMBLIES.
 #
-# Usage: tools/corpus/run-corpus.sh [--framework net10.0] [--keep]
+# The templates consume AuthzProbe as a package from a local feed rather than as a project
+# reference. That is deliberate twice over: it is what a user actually installs, so packaging
+# mistakes surface here; and an SDK cannot evaluate a project multi-targeting a framework it
+# does not know, so a .NET 8 corpus run could not reference the project at all.
+#
+# Usage: tools/corpus/run-corpus.sh [--framework net10.0|net8.0] [--keep]
 
 set -euo pipefail
 
@@ -23,6 +28,7 @@ done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXPECTATIONS="$REPO_ROOT/tools/corpus/expectations.tsv"
+PROJECT="$REPO_ROOT/src/AuthzProbe/AuthzProbe.csproj"
 WORK="$(mktemp -d)"
 
 cleanup() { [ "$KEEP" -eq 1 ] || rm -rf "$WORK"; }
@@ -31,15 +37,58 @@ trap cleanup EXIT
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_NOLOGO=1
 
+VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$PROJECT" | head -1)"
+
 echo "Corpus root: $WORK"
 echo "Framework:   $FRAMEWORK"
+echo "Package:     AuthzProbe $VERSION"
+echo
+
+# Pack from the repository root, where the newest installed SDK is in charge and every
+# target framework can be built.
+echo "Packing the library into a local feed..."
+dotnet pack "$PROJECT" -c Release -o "$WORK/feed" > /dev/null
+
+# The generated applications live under $WORK. Pinning the SDK here is what makes
+# `dotnet new` emit a project targeting the framework under test.
+case "$FRAMEWORK" in
+  net8.0)  SDK_BAND="8.0.100" ;;
+  net10.0) SDK_BAND="10.0.100" ;;
+  *) echo "unsupported framework: $FRAMEWORK" >&2; exit 2 ;;
+esac
+
+cat > "$WORK/global.json" <<JSON
+{
+  "sdk": {
+    "version": "$SDK_BAND",
+    "rollForward": "latestFeature"
+  }
+}
+JSON
+
+cat > "$WORK/NuGet.config" <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="corpus-local" value="./feed" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+</configuration>
+XML
+
+cd "$WORK"
+
+echo "SDK in use for the corpus: $(dotnet --version)"
 echo
 
 failures=0
 checked=0
 
-while read -r name template extra max_analysed want_errors want_warnings want_infos; do
+while read -r framework name template extra max_analysed want_errors want_warnings want_infos; do
   case "$name" in ''|\#*) continue ;; esac
+  case "$framework" in ''|\#*) continue ;; esac
+  [ "$framework" = "$FRAMEWORK" ] || continue
   [ "$extra" = "-" ] && extra=""
 
   app="$WORK/$name"
@@ -47,7 +96,7 @@ while read -r name template extra max_analysed want_errors want_warnings want_in
 
   # shellcheck disable=SC2086
   dotnet new "$template" -o "$app" $extra --force > /dev/null
-  dotnet add "$app" reference "$REPO_ROOT/src/AuthzProbe/AuthzProbe.csproj" > /dev/null
+  dotnet add "$app" package AuthzProbe --version "$VERSION" > /dev/null
 
   # The target application's source is never touched. Prove it, so a future change that
   # quietly starts patching the app cannot pass this check.
@@ -63,7 +112,7 @@ while read -r name template extra max_analysed want_errors want_warnings want_in
   ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=AuthzProbe \
   AUTHZPROBE_EXIT=1 \
   AUTHZPROBE_REPORT_PATH="$report" \
-  dotnet run --project "$app" -f "$FRAMEWORK" --no-launch-profile \
+  dotnet run --project "$app" --no-launch-profile \
     --urls "http://127.0.0.1:0" > "$WORK/$name.stdout" 2>&1
   run_status=$?
   set -e
@@ -112,13 +161,18 @@ while read -r name template extra max_analysed want_errors want_warnings want_in
   echo
 done < "$EXPECTATIONS"
 
+if [ "$checked" -eq 0 ]; then
+  echo "corpus: no expectations matched framework $FRAMEWORK" >&2
+  exit 1
+fi
+
 echo "-----------------------------------------"
 if [ "$failures" -gt 0 ]; then
-  echo "corpus: $failures of $checked templates did not match expectations"
+  echo "corpus ($FRAMEWORK): $failures of $checked templates did not match expectations"
   echo
   echo "If a template legitimately changed, update tools/corpus/expectations.tsv — but read"
   echo "the report above first and satisfy yourself the new numbers are right."
   exit 1
 fi
 
-echo "corpus: all $checked templates match expectations"
+echo "corpus ($FRAMEWORK): all $checked templates match expectations"
