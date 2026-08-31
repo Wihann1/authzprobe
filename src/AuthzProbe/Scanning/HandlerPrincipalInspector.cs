@@ -116,6 +116,16 @@ public static class HandlerPrincipalInspector
         // "blind" when the whole body was read successfully.
         var (members, complete) = ResolveReferencedMembers(target, il);
 
+        // A body that only throws is a stub, not an implementation — an abstract-in-spirit
+        // base whose real handler lives in a derived type. ASP.NET Core Identity's page models
+        // are built this way: the routed type's handlers throw, and the generic subclass
+        // registered at runtime holds the code that reads the principal. Concluding "blind"
+        // from a stub reports a safe endpoint as a defect.
+        if (IsThrowOnlyStub(il))
+        {
+            return HandlerInspection.Unknown;
+        }
+
         if (members.Any(IsPrincipalReference))
         {
             return HandlerInspection.PrincipalAware;
@@ -235,6 +245,17 @@ public static class HandlerPrincipalInspector
         return member.DeclaringType is { } declaring && IsPrincipalType(declaring);
     }
 
+    /// <summary>
+    /// True when the body cannot return — it throws and never returns — which makes it a
+    /// placeholder rather than a handler.
+    /// </summary>
+    private static bool IsThrowOnlyStub(byte[] il)
+    {
+        var (_, complete, sawReturn, sawThrow) = ScanBody(il);
+
+        return complete && sawThrow && !sawReturn;
+    }
+
     private static bool IsPrincipalType(Type type) =>
         PrincipalTypeNames.Contains(type.Name, StringComparer.Ordinal)
         || string.Equals(type.Name, "HttpContext", StringComparison.Ordinal);
@@ -290,7 +311,19 @@ public static class HandlerPrincipalInspector
     /// </summary>
     private static (List<int> Tokens, bool Complete) WalkTokens(byte[] il)
     {
+        var (tokens, complete, _, _) = ScanBody(il);
+        return (tokens, complete);
+    }
+
+    /// <summary>
+    /// Walks IL once, collecting member-referencing tokens and noting whether the body can
+    /// return and whether it throws.
+    /// </summary>
+    private static (List<int> Tokens, bool Complete, bool SawReturn, bool SawThrow) ScanBody(byte[] il)
+    {
         var tokens = new List<int>();
+        var sawReturn = false;
+        var sawThrow = false;
         var pos = 0;
 
         while (pos < il.Length)
@@ -303,7 +336,7 @@ public static class HandlerPrincipalInspector
             {
                 if (pos >= il.Length)
                 {
-                    return (tokens, false);
+                    return (tokens, false, sawReturn, sawThrow);
                 }
 
                 code = (short)(0xFE00 | il[pos]);
@@ -315,7 +348,17 @@ public static class HandlerPrincipalInspector
                 // Unrecognised opcode means alignment is lost. Report the walk as
                 // incomplete so the caller does not treat the absence of a principal
                 // reference as proof of absence.
-                return (tokens, false);
+                return (tokens, false, sawReturn, sawThrow);
+            }
+
+            if (op.Value == System.Reflection.Emit.OpCodes.Ret.Value)
+            {
+                sawReturn = true;
+            }
+            else if (op.Value == System.Reflection.Emit.OpCodes.Throw.Value
+                     || op.Value == System.Reflection.Emit.OpCodes.Rethrow.Value)
+            {
+                sawThrow = true;
             }
 
             var operandSize = op.OperandType switch
@@ -332,7 +375,7 @@ public static class HandlerPrincipalInspector
             {
                 if (pos + 4 > il.Length)
                 {
-                    return (tokens, false);
+                    return (tokens, false, sawReturn, sawThrow);
                 }
 
                 var count = BitConverter.ToInt32(il, pos);
@@ -342,7 +385,7 @@ public static class HandlerPrincipalInspector
                 // would be worse than stopping.
                 if (count < 0 || count > (il.Length - pos - 4) / 4)
                 {
-                    return (tokens, false);
+                    return (tokens, false, sawReturn, sawThrow);
                 }
 
                 pos += 4 + (count * 4);
@@ -351,7 +394,7 @@ public static class HandlerPrincipalInspector
 
             if (pos + operandSize > il.Length)
             {
-                return (tokens, false);
+                return (tokens, false, sawReturn, sawThrow);
             }
 
             var isTokenOperand = op.OperandType
@@ -368,7 +411,7 @@ public static class HandlerPrincipalInspector
             pos += operandSize;
         }
 
-        return (tokens, true);
+        return (tokens, true, sawReturn, sawThrow);
     }
 
     private static Dictionary<short, OpCode> BuildOpCodeTable()

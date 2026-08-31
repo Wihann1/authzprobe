@@ -42,6 +42,12 @@ public static class FindingCodes
     /// nothing scopes it to the caller.
     /// </summary>
     public const string BodyResourceAccess = "AZP006";
+
+    /// <summary>
+    /// Nothing on the whole surface carries authorization metadata, so the application is
+    /// probably enforcing access some other way that AuthzProbe cannot see.
+    /// </summary>
+    public const string AuthorizationNotObservable = "AZP007";
 }
 
 /// <summary>A single problem found in the authorization surface.</summary>

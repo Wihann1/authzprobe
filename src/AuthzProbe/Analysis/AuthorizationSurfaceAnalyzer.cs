@@ -81,6 +81,8 @@ public static class AuthorizationSurfaceAnalyzer
             }
         }
 
+        findings = CollapseWhenNothingIsObservable(findings, analysed, options);
+
         var baseline = options.Baseline;
 
         if (baseline is null)
@@ -98,6 +100,69 @@ public static class AuthorizationSurfaceAnalyzer
             baselined,
             baseline.StaleEntries(findings));
     }
+
+    /// <summary>
+    /// Replaces a wall of AZP001s with one finding when the entire surface lacks authorization
+    /// metadata.
+    /// </summary>
+    /// <remarks>
+    /// Some applications enforce access with their own MVC filters, middleware or an upstream
+    /// gateway rather than with ASP.NET Core authorization. nopCommerce is one: it has no
+    /// AddAuthorization call anywhere and guards its admin area with permission filters, so a
+    /// literal reading of its routing table produced 1,675 findings on 1,675 endpoints. Every
+    /// one was true and the report was worthless — the same failure as reporting a stylesheet
+    /// per file. Saying it once, and saying what it means, is the useful answer.
+    /// </remarks>
+    private static List<Finding> CollapseWhenNothingIsObservable(
+        List<Finding> findings,
+        IReadOnlyList<HttpEndpointInfo> analysed,
+        AuthzProbeOptions options)
+    {
+        var anonymous = findings.Where(f => f.Code == FindingCodes.ImplicitlyAnonymous).ToList();
+
+        // Only when the surface is large enough for the absence to mean something, and
+        // practically nothing on it is protected.
+        if (analysed.Count < MinimumSurfaceForCollapse
+            || anonymous.Count < MinimumSurfaceForCollapse
+            || anonymous.Count < analysed.Count * UnprotectedShareForCollapse
+            || options.SuppressedCodes.Contains(FindingCodes.AuthorizationNotObservable))
+        {
+            return findings;
+        }
+
+        var collapsed = findings.Where(f => f.Code != FindingCodes.ImplicitlyAnonymous).ToList();
+
+        collapsed.Insert(0, new Finding
+        {
+            Code = FindingCodes.AuthorizationNotObservable,
+            Severity = FindingSeverity.Error,
+            Title = "No endpoint on this surface carries authorization metadata",
+            Detail =
+                $"{anonymous.Count} of {analysed.Count} analysed endpoints have no authorization "
+                + "metadata and no [AllowAnonymous]. When it is the whole surface rather than a few "
+                + "endpoints, the likeliest explanation is not that everything is unprotected but "
+                + "that this application enforces access some other way — its own MVC filters, "
+                + "middleware, or an upstream gateway — which AuthzProbe cannot see. Treat this "
+                + "report as inconclusive rather than as a clean bill of health, because the object "
+                + "level rules depend on reading authorization that is not there to read. If the "
+                + "application is meant to use ASP.NET Core authorization, then the surface really "
+                + "is open and this is the finding to act on.",
+            Evidence = $"{anonymous.Count} of {analysed.Count} endpoints",
+            Remediation =
+                "If access is enforced by custom filters or middleware, AuthzProbe is the wrong "
+                + "tool for this application until that moves to ASP.NET Core authorization. "
+                + "Otherwise add a fallback policy so the default is deny, and [AllowAnonymous] "
+                + "where public access is intended."
+        });
+
+        return collapsed;
+    }
+
+    /// <summary>Below this many endpoints, an absence of metadata is not evidence of a pattern.</summary>
+    private const int MinimumSurfaceForCollapse = 20;
+
+    /// <summary>How much of the surface must be unprotected before it reads as "all of it".</summary>
+    private const double UnprotectedShareForCollapse = 0.98;
 
     private static IEnumerable<Finding> Evaluate(HttpEndpointInfo endpoint, AuthzProbeOptions options)
     {

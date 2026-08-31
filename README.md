@@ -68,6 +68,7 @@ report.ThrowIfFailed();
 | **AZP004** | Info | Object-addressing endpoint guarded only by a role. A role says what kind of user you are, never which rows are yours. |
 | **AZP005** | Info | Object-addressing endpoint with no declarative scoping, but its handler *does* touch the caller — or could not be inspected. A review list, not a defect list. |
 | **AZP006** | Info | The route shows no identifier, but the handler binds one from the **request body**, and nothing scopes it to the caller. The same defect, hidden from the route table. |
+| **AZP007** | Error | *Nothing* on the surface carries authorization metadata. Usually means the application enforces access somewhere this tool cannot see, so the report is inconclusive rather than clean. |
 
 ### It reads what is enforced, not what is declared
 
@@ -214,7 +215,8 @@ anything. [**docs/real-world.md**](docs/real-world.md) is the other half: a run 
 Microsoft's eShopOnWeb reference application — 78 endpoints across two projects, installed as a
 package and attached without modifying a line of its source.
 
-It found `/Admin` served anonymously despite `[Authorize(Roles = ADMINISTRATORS)]` sitting on the
+Five applications were probed — eShopOnWeb, Jellyfin, Clean Architecture, nopCommerce — covering
+minimal APIs, MVC, Razor Pages and FastEndpoints. It found `/Admin` served anonymously despite `[Authorize(Roles = ADMINISTRATORS)]` sitting on the
 page's model class. The `.cshtml` has no `@model` directive, so the page never binds to that
 model and the attribute never reaches the endpoint — confirmed with `GET /Admin` returning 200
 while two genuinely protected pages returned 302 to the login page. An analyzer reading source
