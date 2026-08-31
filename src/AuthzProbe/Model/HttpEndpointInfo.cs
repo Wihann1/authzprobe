@@ -31,10 +31,19 @@ public sealed record HttpEndpointInfo
     public IReadOnlyList<string> RouteParameters { get; init; } = [];
 
     /// <summary>
-    /// True when a route parameter looks like it addresses a specific stored object.
-    /// These are the endpoints where broken object level authorization (IDOR) lives.
+    /// True when the caller can name a specific stored object through the route or the query
+    /// string. These are the endpoints where broken object level authorization (IDOR) lives.
     /// </summary>
     public bool ExposesResourceIdentifier { get; init; }
+
+    /// <summary>Identifier-shaped parameters the handler binds from the query string.</summary>
+    public IReadOnlyList<string> QueryIdentifiers { get; init; } = [];
+
+    /// <summary>
+    /// Identifier-shaped properties on a type bound from the request body. The same defect as a
+    /// route identifier, but invisible in a route template.
+    /// </summary>
+    public IReadOnlyList<string> BodyIdentifiers { get; init; } = [];
 
     /// <summary>
     /// Requirement type names from any <c>AuthorizationPolicy</c> attached directly to the

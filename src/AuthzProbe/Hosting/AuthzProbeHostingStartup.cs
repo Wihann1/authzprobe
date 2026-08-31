@@ -80,7 +80,24 @@ internal sealed class AuthzProbeReporter : IHostedService
                 options.IncludeInfrastructureEndpoints = true;
             }
 
+            // AUTHZPROBE_BASELINE forgives what the codebase already had; a missing file is an
+            // empty baseline, so the first run on a new project behaves normally.
+            if (Read("AUTHZPROBE_BASELINE") is { Length: > 0 } baselinePath)
+            {
+                options.Baseline = AuthzProbeBaseline.Load(baselinePath);
+            }
+
             var report = AuthorizationSurfaceAnalyzer.Analyze(_services, options);
+
+            // Writing the baseline records today's surface and reports nothing as a failure:
+            // adopting the tool should never be a build break.
+            if (Read("AUTHZPROBE_WRITE_BASELINE") is { Length: > 0 } writePath)
+            {
+                File.WriteAllText(writePath, report.ToBaseline().ToFileContent());
+                Console.WriteLine($"AuthzProbe wrote a baseline of "
+                                  + $"{report.Findings.Count + report.BaselinedFindings.Count} findings to {writePath}");
+                return;
+            }
             var markdown = report.ToMarkdown();
 
             Console.WriteLine(markdown);
