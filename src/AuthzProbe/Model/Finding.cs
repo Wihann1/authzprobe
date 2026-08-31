@@ -48,6 +48,12 @@ public static class FindingCodes
     /// probably enforcing access some other way that AuthzProbe cannot see.
     /// </summary>
     public const string AuthorizationNotObservable = "AZP007";
+
+    /// <summary>
+    /// The object-level rules did not run, because the application's default policy makes every
+    /// authorized endpoint look declaratively scoped.
+    /// </summary>
+    public const string ObjectAnalysisDidNotRun = "AZP008";
 }
 
 /// <summary>A single problem found in the authorization surface.</summary>

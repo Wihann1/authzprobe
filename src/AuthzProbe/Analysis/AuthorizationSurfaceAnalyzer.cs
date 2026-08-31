@@ -82,6 +82,7 @@ public static class AuthorizationSurfaceAnalyzer
         }
 
         findings = CollapseWhenNothingIsObservable(findings, analysed, options);
+        ReportObjectAnalysisThatDidNotRun(findings, analysed, options);
 
         var baseline = options.Baseline;
 
@@ -156,6 +157,60 @@ public static class AuthorizationSurfaceAnalyzer
         });
 
         return collapsed;
+    }
+
+    /// <summary>
+    /// Says so when the object-level rules were skipped across the surface.
+    /// </summary>
+    /// <remarks>
+    /// A bare <c>[Authorize]</c> resolves to the application's default policy. When that policy
+    /// carries a custom requirement — Jellyfin's does — every authorized endpoint counts as
+    /// declaratively scoped, and the object-level rules skip all of them. An independent review
+    /// found this had switched the analysis off for roughly 355 Jellyfin endpoints while the
+    /// report said nothing at all. Silence that looks like a clean result is the worst thing a
+    /// tool of this kind can do, so it now says what it did not examine.
+    /// </remarks>
+    private static void ReportObjectAnalysisThatDidNotRun(
+        List<Finding> findings,
+        IReadOnlyList<HttpEndpointInfo> analysed,
+        AuthzProbeOptions options)
+    {
+        if (options.SuppressedCodes.Contains(FindingCodes.ObjectAnalysisDidNotRun))
+        {
+            return;
+        }
+
+        var skipped = analysed
+            .Where(e => e.ScopingCameFromDefaultPolicy
+                        && e.HasSubstantiveRequirement
+                        && (e.ExposesResourceIdentifier || e.BodyIdentifiers.Count > 0))
+            .ToArray();
+
+        if (skipped.Length == 0)
+        {
+            return;
+        }
+
+        findings.Insert(0, new Finding
+        {
+            Code = FindingCodes.ObjectAnalysisDidNotRun,
+            Severity = FindingSeverity.Error,
+            Title = "Object-level analysis did not run for most of this application",
+            Detail =
+                $"{skipped.Length} object-addressing endpoints were not examined by the object-level "
+                + "rules. Each of them carries only a bare [Authorize], which resolves to this "
+                + "application's default policy, and that policy carries a requirement beyond "
+                + "'signed in'. Every such endpoint therefore counts as declaratively scoped whether "
+                + "or not anything about the object is actually checked. "
+                + "The absence of AZP002 and AZP005 findings for these endpoints means the rules did "
+                + "not look, not that they looked and found nothing. Read this report as incomplete.",
+            Evidence = $"{skipped.Length} of {analysed.Count} endpoints skipped",
+            Remediation =
+                "Express per-object rules in endpoint-specific policies rather than relying on the "
+                + "default policy, so each endpoint states what it enforces. To analyse these "
+                + "endpoints anyway, temporarily set AuthorizationOptions.DefaultPolicy back to "
+                + "RequireAuthenticatedUser and re-run."
+        });
     }
 
     /// <summary>Below this many endpoints, an absence of metadata is not evidence of a pattern.</summary>
@@ -301,18 +356,24 @@ public static class AuthorizationSurfaceAnalyzer
             yield return new Finding
             {
                 Code = FindingCodes.UnverifiedResourceAccess,
-                Severity = FindingSeverity.Info,
-                Title = "Object-addressing endpoint scopes access in the handler, not declaratively",
+                Severity = FindingSeverity.Warning,
+                Title = "Object-addressing endpoint has no verifiable scoping to the caller",
                 Detail =
-                    "The endpoint takes an object identifier and carries no resource-based policy, "
-                    + "but its handler either references the authenticated principal — so it may well "
-                    + "be enforcing ownership in its body — or could not be inspected. AuthzProbe "
-                    + "cannot tell whether a check exists or whether it is the right one. "
-                    + "This is a review list, not a defect list.",
+                    "The endpoint takes an object identifier and carries no resource-based policy. "
+                    + "Its handler references the authenticated principal, or could not be inspected. "
+                    + "That the handler touches the principal is NOT evidence that it scopes anything: "
+                    + "a handler can read the caller's identity and then ignore it, which is precisely "
+                    + "what this defect looks like from the outside. An independent review of this tool "
+                    + "found a real IDOR reported under this code, in a handler that received the "
+                    + "caller's user name and filtered on the object identifier alone. "
+                    + "This carries the same severity as AZP002 deliberately: AuthzProbe cannot tell "
+                    + "these two cases apart, and pretending otherwise is how the real one stayed "
+                    + "hidden.",
                 Endpoint = name,
                 Remediation =
-                    "Confirm the handler filters by the caller rather than merely reading their "
-                    + "identity. Moving the check into a resource-based policy makes it verifiable."
+                    "Read the handler, and the code it calls, and confirm the caller's identity "
+                    + "actually reaches the query that loads the object — not merely that it is "
+                    + "passed along. Moving the check into a resource-based policy makes it verifiable."
             };
 
             yield break;

@@ -77,10 +77,12 @@ public class AuthorizationSurfaceAnalyzerTests
     }
 
     [Fact]
-    public void Downgrades_to_review_when_the_handler_reads_the_principal()
+    public void Reports_for_review_when_the_handler_reads_the_principal()
     {
-        // The handler takes HttpContext and reads ctx.User, so it may be scoping
-        // ownership in its body. That is a review item, not a defect.
+        // The handler takes HttpContext and reads ctx.User, so it *may* be scoping ownership.
+        // It is reported at the same severity as AZP002: touching the principal is not evidence
+        // of a check, and a real IDOR was found hiding under this code in a handler that read
+        // the caller's name and filtered on the object id alone.
         var report = AnalyzeSample();
 
         var flagged = EndpointsFlagged(report, FindingCodes.UnverifiedResourceAccess).ToList();
@@ -88,7 +90,7 @@ public class AuthorizationSurfaceAnalyzerTests
         Assert.Contains("GET /api/statements/{statementId}", flagged);
         Assert.All(
             report.Findings.Where(f => f.Code == FindingCodes.UnverifiedResourceAccess),
-            f => Assert.Equal(FindingSeverity.Info, f.Severity));
+            f => Assert.Equal(FindingSeverity.Warning, f.Severity));
     }
 
     [Fact]
@@ -133,7 +135,7 @@ public class AuthorizationSurfaceAnalyzerTests
 
         var finding = Assert.Single(report.Findings);
         Assert.Equal(FindingCodes.UnverifiedResourceAccess, finding.Code);
-        Assert.Equal(FindingSeverity.Info, finding.Severity);
+        Assert.Equal(FindingSeverity.Warning, finding.Severity);
     }
 
     [Fact]

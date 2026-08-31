@@ -81,6 +81,14 @@ public sealed record HttpEndpointInfo
     public bool CoveredByFallbackPolicy { get; init; }
 
     /// <summary>
+    /// True when everything this endpoint enforces beyond "signed in" comes from the
+    /// application's default policy rather than from anything declared on the endpoint. Such an
+    /// endpoint looks declaratively scoped without any per-object rule being expressed, so the
+    /// object-level checks skip it.
+    /// </summary>
+    public bool ScopingCameFromDefaultPolicy { get; init; }
+
+    /// <summary>
     /// True when the requirements actually enforced at runtime are known. False when a named
     /// policy could not be resolved, in which case no conclusion may be drawn about scoping —
     /// the policy could be doing anything.
