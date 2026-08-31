@@ -143,3 +143,67 @@ public class BaselineTests
         }
     }
 }
+
+/// <summary>
+/// nopCommerce enforces access with its own MVC permission filters and never calls
+/// AddAuthorization, so a literal reading of its routing table produced 1,675 findings on
+/// 1,675 endpoints. Every one was true and the report was worthless.
+/// </summary>
+public class WholeSurfaceUnprotectedTests
+{
+    private static IReadOnlyList<HttpEndpointInfo> Surface(int count, int protectedCount = 0) =>
+        Enumerable.Range(0, count)
+            .Select(i => new HttpEndpointInfo
+            {
+                DisplayName = $"api/thing{i}",
+                RoutePattern = $"api/thing{i}",
+                HttpMethods = ["GET"],
+                RequiresAuthorization = i < protectedCount
+            })
+            .ToArray();
+
+    [Fact]
+    public void A_wholly_unprotected_surface_is_reported_once()
+    {
+        var report = AuthorizationSurfaceAnalyzer.Analyze(Surface(1675));
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(FindingCodes.AuthorizationNotObservable, finding.Code);
+        Assert.Equal(FindingSeverity.Error, finding.Severity);
+        Assert.Contains("1675 of 1675", finding.Evidence);
+        Assert.False(report.Passed);
+    }
+
+    [Fact]
+    public void A_small_surface_is_still_reported_endpoint_by_endpoint()
+    {
+        // Below the threshold an absence of metadata is not evidence of a pattern, and the
+        // per-endpoint list is what someone can act on.
+        var report = AuthorizationSurfaceAnalyzer.Analyze(Surface(5));
+
+        Assert.Equal(5, report.Findings.Count);
+        Assert.All(report.Findings, f => Assert.Equal(FindingCodes.ImplicitlyAnonymous, f.Code));
+    }
+
+    [Fact]
+    public void A_surface_with_real_authorization_keeps_its_individual_findings()
+    {
+        // A tenth of the endpoints are protected, so the application clearly does use
+        // ASP.NET Core authorization and the unprotected ones are genuine findings.
+        var report = AuthorizationSurfaceAnalyzer.Analyze(Surface(100, protectedCount: 10));
+
+        Assert.Equal(90, report.Findings.Count);
+        Assert.All(report.Findings, f => Assert.Equal(FindingCodes.ImplicitlyAnonymous, f.Code));
+    }
+
+    [Fact]
+    public void The_collapse_can_be_suppressed_like_any_other_code()
+    {
+        var options = new AuthzProbeOptions();
+        options.SuppressedCodes.Add(FindingCodes.AuthorizationNotObservable);
+
+        var report = AuthorizationSurfaceAnalyzer.Analyze(Surface(100), options);
+
+        Assert.Equal(100, report.Findings.Count);
+    }
+}

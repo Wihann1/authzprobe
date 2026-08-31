@@ -322,3 +322,55 @@ public class MultipleHandlerTests
             HandlerPrincipalInspector.InspectAll([Method(nameof(Blind)), Method(nameof(Aware))]));
     }
 }
+
+/// <summary>
+/// A handler body that only throws is a placeholder, not an implementation. ASP.NET Core
+/// Identity is built this way — the routed page model's handlers throw, and the generic
+/// subclass registered at runtime holds the code that reads the principal — so treating a
+/// stub as proof of blindness reports a safe endpoint as a defect.
+/// </summary>
+public class StubHandlerTests
+{
+    private abstract class PageBase
+    {
+        public virtual string Handle(string id) => throw new NotImplementedException();
+
+        public virtual string HandleWithMessage(string id) =>
+            throw new NotSupportedException("overridden in the derived type");
+    }
+
+    private sealed class RealPage : PageBase
+    {
+        public override string Handle(string id) => id;
+    }
+
+    private static HandlerInspection InspectOn<T>(string name) =>
+        HandlerPrincipalInspector.Inspect(
+            typeof(T).GetMethod(name,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance));
+
+    [Fact]
+    public void A_handler_that_only_throws_is_unknown_not_blind() =>
+        Assert.Equal(HandlerInspection.Unknown, InspectOn<PageBase>(nameof(PageBase.Handle)));
+
+    [Fact]
+    public void A_stub_that_throws_with_an_argument_is_also_unknown() =>
+        Assert.Equal(HandlerInspection.Unknown, InspectOn<PageBase>(nameof(PageBase.HandleWithMessage)));
+
+    [Fact]
+    public void A_real_handler_that_returns_is_still_judged() =>
+        Assert.Equal(HandlerInspection.PrincipalBlind, InspectOn<RealPage>(nameof(RealPage.Handle)));
+
+    [Fact]
+    public void A_handler_that_throws_on_one_path_but_returns_on_another_is_still_judged()
+    {
+        // Guard clauses are ordinary code, not a stub: the body can still return.
+        Assert.Equal(HandlerInspection.PrincipalBlind, InspectOn<GuardedPage>(nameof(GuardedPage.Handle)));
+    }
+
+    private sealed class GuardedPage
+    {
+        public string Handle(string id) =>
+            id.Length == 0 ? throw new ArgumentException(null, nameof(id)) : id;
+    }
+}
