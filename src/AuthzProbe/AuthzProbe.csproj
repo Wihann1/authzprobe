@@ -11,7 +11,7 @@
 
   <PropertyGroup>
     <PackageId>AuthzProbe</PackageId>
-    <Version>0.7.0</Version>
+    <Version>0.8.1</Version>
     <Authors>Wihann van der Merwe</Authors>
     <Description>Reports ASP.NET Core endpoints where nothing answers the question "is this row yours?" — the shape of broken object level authorization (IDOR / BOLA, OWASP API1). Resolves the authorization each endpoint actually enforces, including named policies, inline policies and the fallback policy, and inspects handler IL for any reference to the caller. It reports where a check is missing or invisible; findings are questions to confirm, not proven vulnerabilities, and a clean report is not a security assurance.</Description>
     <PackageTags>aspnetcore;authorization;security;idor;bola;testing;multitenancy</PackageTags>

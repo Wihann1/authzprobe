@@ -5,21 +5,26 @@
 [![Downloads](https://img.shields.io/nuget/dt/AuthzProbe.svg)](https://www.nuget.org/packages/AuthzProbe)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Finds the ASP.NET Core endpoints where nothing answers the question "is this row yours?"**
+**Reports what your ASP.NET Core application actually enforces, and where that differs from what
+it appears to enforce.**
 
 ```
 dotnet add package AuthzProbe
 ```
 
-Static analysis can prove your query is parameterised. It cannot know that `GET /invoices/{id}`
-should only return invoices belonging to the caller, because ownership is a property of your
-domain, not of your syntax. That gap is where broken object level authorization lives — OWASP
-API #1, and the defect class that compiles cleanly and passes every test you have.
+What an endpoint *declares* and what the authorization middleware *enforces* are different things,
+and only the second one is real. A policy is a string until someone resolves it; a fallback policy
+protects endpoints that declare nothing; an `[Authorize]` attribute on a Razor Page model does
+nothing at all if the `.cshtml` never binds to that model. AuthzProbe reads the routing table the
+framework actually built and reports the difference.
 
-AuthzProbe reads the routing table your application actually built and reports the endpoints where
-that question is *unanswered* — no resource-based policy, and no reference to the caller in the
-handler. It reports where a check is **missing or invisible**. It does not prove a vulnerability,
-and a clean report is not a security assurance. See [what it does not do](#what-it-does-not-do).
+It also lists the endpoints that address a specific object without any verifiable scoping to the
+caller. Read those as **questions to answer, not defects** — see
+[what this does not do](#what-it-does-not-do), which is the most important section on this page
+and is backed by [an independent review](docs/real-world.md) that falsified an earlier claim here.
+
+**A clean report is not a security assurance.** It means nothing was found by the checks that
+exist.
 
 ## Use it
 
@@ -65,10 +70,10 @@ report.ThrowIfFailed();
 | Code | Severity | What it means |
 |---|---|---|
 | **AZP001** | Error | Endpoint has no authorization metadata and no `[AllowAnonymous]` — it is anonymous *by omission*, not by decision. |
-| **AZP002** | Warning | Endpoint takes an object identifier, the authorization it *enforces* stops at "signed in", and **neither the handler nor the methods it calls reference the caller**. The strongest signal here — still a finding to check, not a proven bug. |
+| **AZP002** | Warning | Endpoint takes an object identifier, the authorization it *enforces* stops at "signed in", and **neither the handler nor the methods it calls reference the caller**. A question to answer. This rule has no verified true positive on real code — see [the review](docs/real-world.md). |
 | **AZP003** | Warning | Explicitly anonymous *and* addresses a specific object. Guessable ids are readable by anyone. |
 | **AZP004** | Info | Object-addressing endpoint guarded only by a role. A role says what kind of user you are, never which rows are yours. |
-| **AZP005** | Info | Object-addressing endpoint with no declarative scoping, but its handler *does* touch the caller — or could not be inspected. A review list, not a defect list. |
+| **AZP005** | Warning | Object-addressing endpoint with no declarative scoping, whose handler touches the caller or could not be inspected. **Touching the caller is not evidence of a check** — a real IDOR hid here, in a handler that received the user name and discarded it. Same severity as AZP002 on purpose. |
 | **AZP006** | Info | The route shows no identifier, but the handler binds one from the **request body**, and nothing scopes it to the caller. The same defect, hidden from the route table. |
 | **AZP007** | Error | *Nothing* on the surface carries authorization metadata. Usually means the application enforces access somewhere this tool cannot see, so the report is inconclusive rather than clean. |
 
