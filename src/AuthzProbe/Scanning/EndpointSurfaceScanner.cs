@@ -184,6 +184,17 @@ public static class EndpointSurfaceScanner
             resolved = true;
         }
 
+        // A bare [Authorize] resolves to the application's default policy. If that policy carries
+        // a real requirement, this endpoint counts as declaratively scoped without anything on it
+        // having said so — and so does every other authorized endpoint in the application.
+        var declaredOnlyBareAuthorize =
+            authorizeData.Count > 0
+            && attachedPolicies.Count == 0
+            && authorizeData.All(a => string.IsNullOrWhiteSpace(a.Policy) && string.IsNullOrWhiteSpace(a.Roles));
+
+        var defaultPolicyIsSubstantive = lookup.DefaultPolicy?.Requirements
+            .Any(r => !string.Equals(r.GetType().Name, "DenyAnonymousAuthorizationRequirement", StringComparison.Ordinal)) == true;
+
         var requirementNames = effective?.Requirements
             .Select(r => r.GetType().Name)
             .Distinct(StringComparer.Ordinal)
@@ -223,6 +234,7 @@ public static class EndpointSurfaceScanner
             RequiresAuthorization = declaresAuthorization || coveredByFallback,
             CoveredByFallbackPolicy = coveredByFallback,
             AuthorizationResolved = resolved,
+            ScopingCameFromDefaultPolicy = declaredOnlyBareAuthorize && defaultPolicyIsSubstantive,
             PolicyRequirements = requirementNames,
             AllowsAnonymous = allowAnonymous,
             Policies = policies,

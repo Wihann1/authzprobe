@@ -213,16 +213,38 @@ public class EffectiveAuthorizationTests
     }
 
     [Fact]
-    public void A_custom_default_policy_is_honoured_for_a_bare_authorize()
+    public void A_custom_default_policy_switches_off_object_analysis_and_says_so()
     {
-        // RequireAuthorization() with no arguments resolves to the default policy, so an
-        // application that put a real requirement there is genuinely scoping.
+        // This test used to assert that no findings were raised, which encoded the bug: a
+        // requirement in the default policy makes every bare [Authorize] endpoint look
+        // declaratively scoped, so the object-level rules skip the whole application. On
+        // Jellyfin that silently skipped roughly 355 endpoints. Silence that reads as a clean
+        // result is worse than a false positive.
         var app = BuildApp(
             authorization: o => o.DefaultPolicy = new AuthorizationPolicyBuilder()
                 .AddRequirements(new OwnershipRequirement())
                 .Build(),
             map: a => a.MapGet("/api/invoices/{id}", (string id) => Results.Ok(new { id }))
                        .RequireAuthorization());
+
+        var endpoint = Assert.Single(EndpointSurfaceScanner.Scan(app));
+        Assert.True(endpoint.ScopingCameFromDefaultPolicy);
+
+        var finding = Assert.Single(AuthorizationSurfaceAnalyzer.Analyze(app).Findings);
+        Assert.Equal(FindingCodes.ObjectAnalysisDidNotRun, finding.Code);
+        Assert.Equal(FindingSeverity.Error, finding.Severity);
+    }
+
+    [Fact]
+    public void An_endpoint_specific_policy_does_not_trigger_the_skipped_analysis_warning()
+    {
+        // Scoping expressed on the endpoint itself is the thing the tool can reason about, so
+        // there is nothing unexamined to report.
+        var app = BuildApp(
+            authorization: o => o.AddPolicy("InvoiceOwner",
+                p => p.Requirements.Add(new OwnershipRequirement())),
+            map: a => a.MapGet("/api/invoices/{id}", (string id) => Results.Ok(new { id }))
+                       .RequireAuthorization("InvoiceOwner"));
 
         Assert.Empty(AuthorizationSurfaceAnalyzer.Analyze(app).Findings);
     }

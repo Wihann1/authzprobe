@@ -20,20 +20,31 @@ internal sealed class PolicyLookup
 {
     private readonly IAuthorizationPolicyProvider? _provider;
 
-    private PolicyLookup(IAuthorizationPolicyProvider? provider, AuthorizationPolicy? fallbackPolicy)
+    private PolicyLookup(
+        IAuthorizationPolicyProvider? provider,
+        AuthorizationPolicy? fallbackPolicy,
+        AuthorizationPolicy? defaultPolicy)
     {
         _provider = provider;
         FallbackPolicy = fallbackPolicy;
+        DefaultPolicy = defaultPolicy;
     }
 
     /// <summary>Used when no service provider is available, so nothing can be resolved.</summary>
-    public static PolicyLookup None { get; } = new(null, null);
+    public static PolicyLookup None { get; } = new(null, null, null);
 
     /// <summary>
     /// The policy applied to endpoints carrying no authorization metadata, or null when the
     /// application has not configured one.
     /// </summary>
     public AuthorizationPolicy? FallbackPolicy { get; }
+
+    /// <summary>
+    /// The policy a bare <c>[Authorize]</c> resolves to. When an application puts a real
+    /// requirement here, every authorized endpoint looks declaratively scoped whether or not it
+    /// is, which switches the object-level rules off across the whole surface.
+    /// </summary>
+    public AuthorizationPolicy? DefaultPolicy { get; }
 
     /// <summary>True when named policies can be resolved to their requirements.</summary>
     public bool CanResolve => _provider is not null;
@@ -72,7 +83,17 @@ internal sealed class PolicyLookup
             fallback = null;
         }
 
-        return new PolicyLookup(provider, fallback);
+        AuthorizationPolicy? defaultPolicy;
+        try
+        {
+            defaultPolicy = provider.GetDefaultPolicyAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            defaultPolicy = null;
+        }
+
+        return new PolicyLookup(provider, fallback, defaultPolicy);
     }
 
     /// <summary>
