@@ -81,7 +81,22 @@ public static class AuthorizationSurfaceAnalyzer
             }
         }
 
-        return new AuthorizationSurfaceReport(analysed, findings, options.FailOn);
+        var baseline = options.Baseline;
+
+        if (baseline is null)
+        {
+            return new AuthorizationSurfaceReport(analysed, findings, options.FailOn);
+        }
+
+        var baselined = findings.Where(baseline.Covers).ToArray();
+        var newFindings = findings.Where(f => !baseline.Covers(f)).ToArray();
+
+        return new AuthorizationSurfaceReport(
+            analysed,
+            newFindings,
+            options.FailOn,
+            baselined,
+            baseline.StaleEntries(findings));
     }
 
     private static IEnumerable<Finding> Evaluate(HttpEndpointInfo endpoint, AuthzProbeOptions options)
@@ -113,13 +128,16 @@ public static class AuthorizationSurfaceAnalyzer
             yield break;
         }
 
-        if (!endpoint.ExposesResourceIdentifier)
+        var addressedByRouteOrQuery = endpoint.ExposesResourceIdentifier;
+        var addressedByBody = endpoint.BodyIdentifiers.Count > 0;
+
+        if (!addressedByRouteOrQuery && !addressedByBody)
         {
             yield break;
         }
 
         // AZP003 — explicitly public *and* addressing a specific object.
-        if (endpoint.AllowsAnonymous)
+        if (endpoint.AllowsAnonymous && addressedByRouteOrQuery)
         {
             yield return new Finding
             {
@@ -142,6 +160,38 @@ public static class AuthorizationSurfaceAnalyzer
         // on it would be a guess in either direction, so report nothing.
         if (!endpoint.AuthorizationResolved)
         {
+            yield break;
+        }
+
+        // An identifier that only ever appears in the request body cannot be judged by the
+        // route rules, which have nothing to look at. It gets its own review-level finding
+        // rather than being folded into a high-confidence one.
+        if (!addressedByRouteOrQuery)
+        {
+            var scopedDeclaratively = endpoint.HasSubstantiveRequirement && !endpoint.RolesAreTheOnlyCheck;
+
+            if (!scopedDeclaratively && endpoint.Handler is not HandlerInspection.PrincipalAware)
+            {
+                yield return new Finding
+                {
+                    Code = FindingCodes.BodyResourceAccess,
+                    Severity = FindingSeverity.Info,
+                    Title = "Endpoint takes an object identifier in its request body",
+                    Detail =
+                        "The route template shows no identifier, but the handler binds one from the "
+                        + "request body. Authorization stops at 'signed in' or at a role, and the "
+                        + "handler does not reference the caller, so the caller chooses which object "
+                        + "is acted on. This is the same defect as an unscoped route identifier, "
+                        + "hidden from the route table. Body binding is inferred from the handler's "
+                        + "signature, so review rather than assume.",
+                    Endpoint = name,
+                    Evidence = "binds " + string.Join(", ", endpoint.BodyIdentifiers),
+                    Remediation =
+                        "Derive the object's owner from the authenticated principal and reject a body "
+                        + "whose identifier does not belong to them, or apply a resource-based policy."
+                };
+            }
+
             yield break;
         }
 

@@ -67,6 +67,7 @@ report.ThrowIfFailed();
 | **AZP003** | Warning | Explicitly anonymous *and* addresses a specific object. Guessable ids are readable by anyone. |
 | **AZP004** | Info | Object-addressing endpoint guarded only by a role. A role says what kind of user you are, never which rows are yours. |
 | **AZP005** | Info | Object-addressing endpoint with no declarative scoping, but its handler *does* touch the caller — or could not be inspected. A review list, not a defect list. |
+| **AZP006** | Info | The route shows no identifier, but the handler binds one from the **request body**, and nothing scopes it to the caller. The same defect, hidden from the route table. |
 
 ### It reads what is enforced, not what is declared
 
@@ -116,6 +117,26 @@ fallbacks. Set `IncludeInfrastructureEndpoints` to analyse them anyway.
 **Fix:** Enforce ownership server-side: derive the owner from the authenticated principal
 rather than the request, or apply a resource-based policy via IAuthorizationService.
 ```
+
+## Adopting it on an existing codebase
+
+A tool that reports two hundred findings on the day it is installed gets uninstalled. Record
+what the codebase already has, and fail only on what is added to it:
+
+```bash
+# once
+AUTHZPROBE_WRITE_BASELINE=authzprobe-baseline.txt \
+ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=AuthzProbe dotnet run --project ./YourApi
+
+# thereafter, in CI
+AUTHZPROBE_BASELINE=authzprobe-baseline.txt AUTHZPROBE_EXIT=1 \
+ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=AuthzProbe dotnet run --project ./YourApi
+```
+
+The file is one finding per line, sorted, so it diffs cleanly — a pull request that adds a line
+is visibly adding an authorization gap. Findings that disappear are reported as stale entries
+to delete, so the baseline cannot go on forgiving a defect that has come back. In code it is
+`options.Baseline = AuthzProbeBaseline.Load(path)`.
 
 ## Configuration
 
@@ -207,13 +228,13 @@ An endpoint with a resource-based policy passes; proving that policy right is yo
 
 The known blind spots:
 
-- If your handler calls a service that reaches the principal internally via `IHttpContextAccessor`,
-  the handler's own IL never mentions it, and AuthzProbe reports AZP002. Ownership checks one level
-  down the call graph are not followed.
-- Only route parameters are examined. An identifier passed in the query string or a request body is
-  the same defect and is not seen.
-- Razor Pages handlers are not inspected, so object-addressing pages land in AZP005 rather than
-  AZP002.
+- Calls the handler makes are followed one level deep, so a helper that reads the principal counts.
+  A call through an **injected interface** is not followed: the interface method has no body, and
+  choosing an implementation would mean knowing the container's registrations. A service reached
+  that way is still reported as AZP002.
+- An identifier in the query string is treated exactly like one in the route. One bound from the
+  request body is reported as **AZP006** at Info, because body binding is inferred from the
+  handler's signature rather than declared in a route template.
 - A handler that merely reads the principal — logging `User.Identity.Name`, say — counts as
   principal-aware and drops from AZP002 to AZP005. The check is a capability test, not a proof that
   the value is used for filtering.
