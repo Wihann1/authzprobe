@@ -175,5 +175,5 @@ dotnet test
 
 ## Targets
 
-`net8.0`, `net9.0` and `net10.0` (current LTS), with the test suite running against all three.
-MIT licensed.
+`net8.0` and `net10.0` — the .NET releases still in support — with the test suite running against
+both. MIT licensed.
