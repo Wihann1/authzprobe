@@ -1,0 +1,13 @@
+# The stock ASP.NET Core templates, and what AuthzProbe should say about each.
+#
+# These are real applications written by Microsoft, not fixtures written to make the tool
+# look good, which is the point: a rule that is wrong about the framework's own idioms is
+# wrong about everybody's code. The endpoint cap is the regression guard that matters —
+# MapStaticAssets registers one endpoint per file, and a stock MVC application once
+# produced 385 findings, 380 of them about bootstrap.css.
+#
+# name              template          extra args           max_analysed  errors  warnings  infos
+webapi-minimal      webapi            --use-minimal-apis   10            1       0         0
+webapi-controllers  webapi            --use-controllers    10            1       0         0
+mvc                 mvc               -                    10            4       0         0
+razorpages          webapp            -                    10            3       0         0
