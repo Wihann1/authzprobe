@@ -61,3 +61,24 @@ jobs:
           name: nupkg
           path: src/AuthzProbe/bin/Release/*.nupkg
           if-no-files-found: error
+
+  corpus:
+    name: Probe the stock ASP.NET Core templates
+    runs-on: ubuntu-latest
+
+    # Unit tests prove the rules behave on endpoints we wrote. This proves they behave on
+    # applications we did not: Microsoft's own templates, generated fresh, probed without
+    # modifying a line of their source. It is the check that caught AuthzProbe reporting
+    # 385 findings on a stock MVC application, 380 of them about bootstrap.css.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Run the corpus
+        run: tools/corpus/run-corpus.sh --framework net10.0
