@@ -5,7 +5,7 @@
 [![Downloads](https://img.shields.io/nuget/dt/AuthzProbe.svg)](https://www.nuget.org/packages/AuthzProbe)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Fails your build when an ASP.NET Core endpoint can be pointed at somebody else's data.**
+**Finds the ASP.NET Core endpoints where nothing answers the question "is this row yours?"**
 
 ```
 dotnet add package AuthzProbe
@@ -16,8 +16,10 @@ should only return invoices belonging to the caller, because ownership is a prop
 domain, not of your syntax. That gap is where broken object level authorization lives — OWASP
 API #1, and the defect class that compiles cleanly and passes every test you have.
 
-AuthzProbe reads your routing table at startup and finds every endpoint where the ownership
-question is *unanswered*, which is overwhelmingly where the answer turns out to be "it doesn't check".
+AuthzProbe reads the routing table your application actually built and reports the endpoints where
+that question is *unanswered* — no resource-based policy, and no reference to the caller in the
+handler. It reports where a check is **missing or invisible**. It does not prove a vulnerability,
+and a clean report is not a security assurance. See [what it does not do](#what-it-does-not-do).
 
 ## Use it
 
@@ -63,7 +65,7 @@ report.ThrowIfFailed();
 | Code | Severity | What it means |
 |---|---|---|
 | **AZP001** | Error | Endpoint has no authorization metadata and no `[AllowAnonymous]` — it is anonymous *by omission*, not by decision. |
-| **AZP002** | Warning | Endpoint takes an object identifier, the authorization it *enforces* stops at "signed in", **and its handler never references the caller** — so it cannot be filtering by them. |
+| **AZP002** | Warning | Endpoint takes an object identifier, the authorization it *enforces* stops at "signed in", and **neither the handler nor the methods it calls reference the caller**. The strongest signal here — still a finding to check, not a proven bug. |
 | **AZP003** | Warning | Explicitly anonymous *and* addresses a specific object. Guessable ids are readable by anyone. |
 | **AZP004** | Info | Object-addressing endpoint guarded only by a role. A role says what kind of user you are, never which rows are yours. |
 | **AZP005** | Info | Object-addressing endpoint with no declarative scoping, but its handler *does* touch the caller — or could not be inspected. A review list, not a defect list. |
@@ -108,7 +110,7 @@ fallbacks. Set `IncludeInfrastructureEndpoints` to analyse them anyway.
 - Findings: **9** (1 error, 5 warning, 3 info)
 - Result: **FAIL**
 
-## AZP002 — Object-addressing endpoint cannot be scoping to the caller (4)
+## AZP002 — Object-addressing endpoint shows no sign of scoping to the caller (4)
 
 - `GET /api/invoices/{id:guid}`
 - `GET /api/tenants/{tenantId}/documents/{documentId}`
@@ -169,9 +171,11 @@ codebase. AuthzProbe closes the gap from the other side: it reads the handler's 
 async state machines to find the real body — and asks whether the code references the
 authenticated principal at all.
 
-A handler that never touches `User`, `ClaimsPrincipal`, `HttpContext` or `IAuthorizationService`
-has no way of knowing who is calling, so it **cannot** be filtering by them. That is a hard
-constraint, not a guess, and those endpoints are reported as **AZP002**.
+A handler that never touches `User`, `ClaimsPrincipal`, `HttpContext` or `IAuthorizationService`,
+and calls nothing that does, is unlikely to be filtering by the caller. Those endpoints are
+reported as **AZP002**. This is the strongest signal the tool has, and it is still evidence rather
+than proof — a service injected as an interface can reach the principal without the handler ever
+naming it, and AuthzProbe will not see that.
 
 Everything else — handlers that do reference the caller, and handlers that could not be read —
 goes to **AZP005** for review.
@@ -225,8 +229,16 @@ It is only false at runtime.
 
 ## What it does not do
 
-It reports where the ownership check is *missing*, not whether a check that exists is *correct*.
-An endpoint with a resource-based policy passes; proving that policy right is your tests' job.
+**A clean report is not a security assurance.** It means AuthzProbe found nothing it knows how to
+look for. Read it as a list of questions to answer, never as evidence that an application is safe,
+and never as a substitute for review or testing.
+
+It reports where an ownership check is *missing or invisible to it*, not whether a check that
+exists is *correct*. An endpoint with a resource-based policy passes; proving that policy right is
+your tests' job.
+
+Findings are **not proven vulnerabilities**. Each one says what was observed. Confirm before
+acting, and expect false positives in the cases below.
 
 The known blind spots:
 

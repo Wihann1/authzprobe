@@ -16,8 +16,9 @@ public enum HandlerInspection
     PrincipalAware,
 
     /// <summary>
-    /// The handler never references the authenticated principal. It cannot know who is
-    /// calling, so it cannot be filtering by them.
+    /// Neither the handler nor the methods it calls directly reference the authenticated
+    /// principal. That is evidence it is not filtering by the caller, not proof: a service
+    /// injected as an interface can reach the principal without the handler naming it.
     /// </summary>
     PrincipalBlind
 }

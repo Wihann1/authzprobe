@@ -12,9 +12,11 @@ namespace AuthzProbe.Scanning;
 /// <remarks>
 /// Routing metadata cannot see inside a handler, so an endpoint that checks ownership
 /// in its body looks identical to one that checks nothing. This closes most of that gap
-/// from the other direction: rather than trying to prove a check exists, it proves one
-/// <em>cannot</em>. A handler whose IL never references the authenticated principal has
-/// no way to know who is calling, so it cannot be filtering by them.
+/// from the other direction: rather than looking for evidence that a check exists, it looks
+/// for evidence that none can. A handler whose IL never references the authenticated principal,
+/// and which calls nothing that does, is unlikely to be filtering by the caller — though a
+/// service injected as an interface can reach the principal without the handler naming it, so
+/// this is evidence rather than proof.
 /// </remarks>
 public static class HandlerPrincipalInspector
 {
