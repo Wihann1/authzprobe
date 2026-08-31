@@ -36,12 +36,6 @@ public static class FindingCodes
 
     /// <summary>Endpoint addresses a specific object and is guarded only by a role check.</summary>
     public const string RoleOnlyResourceAccess = "AZP004";
-
-    /// <summary>A cross-actor probe reached another actor's object.</summary>
-    public const string CrossActorAccessGranted = "AZP010";
-
-    /// <summary>A probe could not be trusted because the control request also failed.</summary>
-    public const string ProbeInconclusive = "AZP011";
 }
 
 /// <summary>A single problem found in the authorization surface.</summary>

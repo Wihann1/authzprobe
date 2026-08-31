@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Security.Claims;
+using AuthzProbe.Hosting;
 using AuthzProbe.Analysis;
 using AuthzProbe.Model;
 using AuthzProbe.Scanning;
@@ -10,6 +12,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using SampleApi;
 
@@ -399,5 +402,52 @@ public class InfrastructureEndpointTests
         var report = AuthorizationSurfaceAnalyzer.Analyze([ApiEndpoint("openapi/{documentName}.json")]);
 
         Assert.Empty(report.Findings);
+    }
+}
+
+/// <summary>
+/// The hosting startup is what lets AuthzProbe attach to an application whose source it has
+/// never touched. The corpus check exercises it end to end against the stock templates; these
+/// cover the wiring itself.
+/// </summary>
+public class HostingStartupTests
+{
+    [Fact]
+    public void The_assembly_advertises_itself_as_a_hosting_startup()
+    {
+        // Without this attribute ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=AuthzProbe silently
+        // does nothing, and the failure looks like "the probe produced no output".
+        var attributes = typeof(AuthzProbeHostingStartup).Assembly
+            .GetCustomAttributes<HostingStartupAttribute>()
+            .ToList();
+
+        Assert.Contains(attributes, a => a.HostingStartupType == typeof(AuthzProbeHostingStartup));
+    }
+
+    [Fact]
+    public void Probing_an_application_is_opt_in()
+    {
+        // Merely referencing the package must not attach the probe to somebody's production
+        // application. A hosting startup assembly loads only when named in configuration.
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddAuthorization();
+        var app = builder.Build();
+
+        Assert.DoesNotContain(
+            app.Services.GetServices<IHostedService>(),
+            s => s.GetType().Name.Contains("AuthzProbe", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Configuring_the_startup_registers_the_reporter()
+    {
+        // Driven through the real WebApplicationBuilder rather than a hand-rolled
+        // IWebHostBuilder: the stub would have to implement obsolete surface, and testing
+        // against the actual implementation is what the probe will meet at runtime.
+        var builder = WebApplication.CreateBuilder();
+
+        new AuthzProbeHostingStartup().Configure(builder.WebHost);
+
+        Assert.Contains(builder.Services, d => d.ServiceType == typeof(IHostedService));
     }
 }

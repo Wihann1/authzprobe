@@ -21,15 +21,8 @@ question is *unanswered*, which is overwhelmingly where the answer turns out to 
 
 ## Use it
 
-```csharp
-var app = builder.Build();
-app.MapControllers();
-
-var report = AuthorizationSurfaceAnalyzer.Analyze(app);
-report.ThrowIfFailed();
-```
-
-Or as a test, so it runs on every pull request:
+**As a test**, so it runs on every pull request. This is the usage to reach for first — a
+heuristic should not be able to stop your application from booting:
 
 ```csharp
 [Fact]
@@ -38,6 +31,31 @@ public void Authorization_surface_is_clean()
     var app = BuildApp();
     AuthorizationSurfaceAnalyzer.Analyze(app).ThrowIfFailed();
 }
+```
+
+**Against an application you have not modified.** Add the package, name it as a hosting startup
+assembly, and the probe attaches to the running application and reports on the routing table the
+framework actually built:
+
+```bash
+ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=AuthzProbe \
+AUTHZPROBE_EXIT=1 \
+dotnet run --project ./YourApi
+```
+
+It writes the report to stdout, exits non-zero when the surface fails, and takes
+`AUTHZPROBE_REPORT_PATH` to write the markdown to a file. A hosting startup assembly is loaded
+only when it is named in that variable, so referencing the package never attaches the probe to
+your production application by accident.
+
+**At startup**, if you want the check inside the application itself:
+
+```csharp
+var app = builder.Build();
+app.MapControllers();
+
+var report = AuthorizationSurfaceAnalyzer.Analyze(app);
+report.ThrowIfFailed();
 ```
 
 ## What it finds
@@ -136,6 +154,36 @@ constraint, not a guess, and those endpoints are reported as **AZP002**.
 Everything else — handlers that do reference the caller, and handlers that could not be read —
 goes to **AZP005** for review.
 
+## Why a runtime library and not an analyzer
+
+A Roslyn analyzer sees source. What decides whether an endpoint is protected is not in the
+source of the endpoint: `MapControllers` applies conventions, `AddAuthorization` registers
+policies under names that are resolved later, `FallbackPolicy` protects endpoints that declare
+nothing, and `RequireAuthorization(configure)` compiles rules into an object no attribute ever
+mentions. Those decisions are spread across files an analyzer would have to stitch together, and
+some of them are only knowable once the container is built.
+
+Reading the routing table the framework actually constructed sidesteps all of it: what is
+scanned is what will be served. The cost is that the application has to start, which is why the
+hosting startup exists — so the thing being measured is a real application, unmodified.
+
+## Tested against applications nobody wrote for it
+
+Unit tests prove the rules behave on endpoints written to exercise them, which is a low bar for
+a tool whose whole job is judging other people's code. So CI also generates the stock ASP.NET
+Core templates — `webapi`, `webapi --use-controllers`, `mvc`, `webapp` — and probes each one
+without modifying a line of its source:
+
+```bash
+tools/corpus/run-corpus.sh
+```
+
+The expectations live in [`tools/corpus/expectations.tsv`](tools/corpus/expectations.tsv), and
+the cap on analysed endpoints is the guard that matters. `MapStaticAssets` registers one endpoint
+per file, and an earlier version of this tool reported **385 findings on a stock MVC application,
+380 of them about `bootstrap.css`**. Unit tests were all green at the time. The corpus is what
+catches that class of mistake.
+
 ## What it does not do
 
 It reports where the ownership check is *missing*, not whether a check that exists is *correct*.
@@ -160,7 +208,7 @@ From the repository root:
 
 ```bash
 cd authzprobe
-dotnet run --project samples/SampleApi -- --probe-only
+dotnet run --project samples/SampleApi -f net10.0 -- --probe-only
 ```
 
 The sample maps thirteen endpoints across minimal APIs and controllers. Nine raise a finding —
@@ -171,6 +219,12 @@ Run the tests the same way:
 
 ```bash
 dotnet test
+```
+
+And probe the stock ASP.NET Core templates, which is what CI does:
+
+```bash
+tools/corpus/run-corpus.sh
 ```
 
 ## Targets
