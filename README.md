@@ -77,6 +77,23 @@ report.ThrowIfFailed();
 | **AZP006** | Info | The route shows no identifier, but the handler binds one from the **request body**, and nothing scopes it to the caller. The same defect, hidden from the route table. |
 | **AZP007** | Error | *Nothing* on the surface carries authorization metadata. Usually means the application enforces access somewhere this tool cannot see, so the report is inconclusive rather than clean. |
 
+### Only Error fails your build by default
+
+`FailOn` defaults to `FindingSeverity.Error`, so **AZP001** and **AZP007** fail a build and
+nothing else does. Every object-level finding — AZP002 through AZP006 — is a Warning or Info, and
+a default run passes with all of them present.
+
+That is deliberate, and it has a cost worth stating plainly: the one real IDOR ever found with
+this tool was reported as a Warning, and a default CI run would not have failed on it. If you want
+the object-level rules to block a build:
+
+```csharp
+var options = new AuthzProbeOptions { FailOn = FindingSeverity.Warning };
+```
+
+Do that once the surface is clean, or with a [baseline](#configuration) — otherwise you are
+trading one answer for a wall of questions, and the questions win.
+
 ### It reads what is enforced, not what is declared
 
 Endpoint metadata records what was *declared*. Three things decide what the authorization
