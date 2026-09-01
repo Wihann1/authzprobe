@@ -302,7 +302,7 @@ tools/corpus/run-corpus.sh --framework net10.0
 
 ## How this was built
 
-Built with Claude Code. The rules, the corpus check and the real-world runs were designed and
+Built with AI assistance. The rules, the corpus check and the real-world runs were designed and
 driven by me; I used the model to implement and to review.
 
 The most useful thing it did was falsify my own claim. A blind replication — a fresh session given
