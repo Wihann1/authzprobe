@@ -283,6 +283,22 @@ And probe the stock ASP.NET Core templates, which is what CI does:
 tools/corpus/run-corpus.sh --framework net10.0
 ```
 
+## How this was built
+
+Built with Claude Code. The rules, the corpus check and the real-world runs were designed and
+driven by me; I used the model to implement and to review.
+
+The most useful thing it did was falsify my own claim. A blind replication — a fresh session given
+the package and five applications with no context, and told not to read the results — found that
+the headline rule, AZP002, had no verified true positive across roughly 2,177 endpoints, and that
+I had cleared a real IDOR in eShopOnWeb by reading the call site instead of the handler that
+discards the caller's identity. Both are recorded in [docs/real-world.md](docs/real-world.md),
+along with what changed as a result: AZP005 raised to the same severity as AZP002 because the tool
+cannot tell the two apart, AZP008 added so a silently skipped analysis says so, and every claim in
+this README rewritten to state what is observed rather than what is proven.
+
+The original conclusions are kept in that document rather than deleted.
+
 ## Targets
 
 `net8.0` and `net10.0` — the .NET releases still in support — with the test suite running against
