@@ -1,0 +1,75 @@
+name: Release
+
+# Publishing happens on a tag, so the released version is always something that
+# exists in the history rather than whatever was on someone's machine.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Pack and publish to NuGet
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # A tag that disagrees with the project version is how a package and its
+      # release notes drift apart. Refuse rather than guess which one was meant.
+      - name: Check the tag matches the project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          project=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/AuthzProbe/AuthzProbe.csproj | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "project version: $project"
+          echo "tag version:     $tag"
+          if [ "$project" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$project</Version> in AuthzProbe.csproj."
+            exit 1
+          fi
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      # A broken package is worse than a late one, and a published version can
+      # never be taken back — only unlisted.
+      - name: Test
+        run: dotnet test --no-build -c Release
+
+      - name: Pack
+        run: dotnet pack src/AuthzProbe/AuthzProbe.csproj --no-build -c Release -o artifacts
+
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::The NUGET_API_KEY repository secret is not set."
+            exit 1
+          fi
+          # The symbols package is pushed automatically alongside the .nupkg.
+          dotnet nuget push "artifacts/*.nupkg" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY" \
+            --skip-duplicate
+
+      - name: Keep the packages on the run
+        uses: actions/upload-artifact@v7
+        with:
+          name: nupkg
+          path: artifacts/*
+          if-no-files-found: error
