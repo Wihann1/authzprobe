@@ -46,12 +46,21 @@ that to one finding, framed as *inconclusive rather than clean*, was judged good
 **AZP002 — the rule this package exists for — did not fire once across 2,177 endpoints.** It has
 no demonstrated true positive on real code.
 
-**It rated a real IDOR as Info.** eShopOnWeb's `GET /order/detail/{orderId}` is genuinely
-vulnerable: the controller passes `User.Identity.Name` into a MediatR query, and
+**It rated a real IDOR below the fail threshold.** eShopOnWeb's `GET /order/detail/{orderId}` is
+genuinely vulnerable: the controller passes `User.Identity.Name` into a MediatR query, and
 `GetOrderDetailsHandler` builds `new OrderWithItemsByIdSpec(request.OrderId)` and never reads the
 user name. The reviewer registered an unprivileged account and pulled another user's order and
-shipping address. AuthzProbe reported it as **AZP005 (Info)**, below the default fail threshold,
-on a list the documentation described as "a review list, not a defect list".
+shipping address. A later review reproduced it end to end — signed in as one account, placed an
+order, signed in as a second account, and read the first account's order and shipping address.
+
+At the time of the first review AuthzProbe reported it as **AZP005 (Info)**, on a list the
+documentation described as "a review list, not a defect list". That severity has since been
+raised to **Warning**, and the framing removed.
+
+**The criticism survives the fix.** `FailOn` defaults to `Error`, so a Warning still does not fail
+a build. A default CI run would not have failed on the one real vulnerability this tool found.
+Set `FailOn = FindingSeverity.Warning` if you want the object-level findings to block a build —
+and understand that this trades a wall of questions for that one answer.
 
 It was demoted *because the handler touches `User`*. That is the flaw, stated plainly: **reading
 the principal and then discarding it is exactly what this bug looks like from the outside**, so the
