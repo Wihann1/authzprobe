@@ -4,6 +4,7 @@
 [![NuGet](https://img.shields.io/nuget/v/AuthzProbe.svg)](https://www.nuget.org/packages/AuthzProbe)
 [![Downloads](https://img.shields.io/nuget/dt/AuthzProbe.svg)](https://www.nuget.org/packages/AuthzProbe)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=000000&labelColor=FFDD00)](https://www.buymeacoffee.com/wihann)
 
 **Reports what your ASP.NET Core application actually enforces, and where that differs from what
 it appears to enforce.**
